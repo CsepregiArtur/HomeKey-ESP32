@@ -138,7 +138,23 @@ void HomeKitLock::begin() {
     homeSpan.setStatusAutoOff(15);
     homeSpan.setSketchVersion(app_version);
     homeSpan.enableAutoStartAP();
-    homeSpan.enableOTA(miscConfig.otaPasswd.c_str());
+    // HomeSpan's own setup access point defaults to the published password
+    // "homespan", which would let anyone in radio range join it during setup and
+    // change the Wi-Fi credentials or the Setup Code. Align it with the device's
+    // setup AP password (random on first boot) so neither AP can be joined with a
+    // value that is printed in the source tree.
+    homeSpan.setApPassword(miscConfig.accessPointPassword.c_str());
+    // HomeSpan's OTA service is an over-the-network firmware upload endpoint whose
+    // only protection is this password. The value shipped in defaults.h is public,
+    // so it is treated as "not configured": leaving OTA off is the safer default,
+    // and users who want it set their own password (Misc -> HomeSpan in the Web UI,
+    // which sends it through the normal config path).
+    if (miscConfig.otaPasswd.empty() || miscConfig.otaPasswd == OTA_PWD) {
+      ESP_LOGW(TAG, "HomeSpan OTA service not started: the OTA password is unset or still the "
+                    "shipped default. Set a custom one under Misc -> HomeSpan to enable it.");
+    } else {
+      homeSpan.enableOTA(miscConfig.otaPasswd.c_str());
+    }
     homeSpan.setPortNum(1201);
     uint8_t mac[6];
     esp_read_mac(mac, ESP_MAC_BT);

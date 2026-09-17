@@ -1,5 +1,6 @@
 import { defineConfig } from "vite";
 import { fileURLToPath, URL } from "node:url";
+import { readFileSync } from "node:fs";
 import devtoolsJson from "vite-plugin-devtools-json";
 import tailwindcss from "@tailwindcss/vite";
 import { svelte } from "@sveltejs/vite-plugin-svelte";
@@ -9,7 +10,13 @@ import { execSync } from "node:child_process";
 
 export default defineConfig(({ mode }) => {
   const isDev = mode === "development";
-  const version : string = execSync('git rev-parse --short=16 HEAD').toString().trim();
+  // Shown in the Web UI next to the firmware version, so a page can always be tied
+  // back to the application version and the exact commit it was built from.
+  const { version: appVersion } = JSON.parse(
+    readFileSync(new URL("./package.json", import.meta.url), "utf8")
+  );
+  const commit: string = execSync('git rev-parse --short=16 HEAD').toString().trim();
+  const version: string = `${appVersion}+${commit}`;
 
   return {
     plugins: [
@@ -22,8 +29,12 @@ export default defineConfig(({ mode }) => {
       tailwindcss(),
       ...(isDev ? [devtoolsJson()] : []),
       compression({
+        // Brotli only: the assets have outgrown the littlefs partition, and shipping
+        // both encodings would need roughly twice the space that exists. The firmware
+        // serves either encoding, so an image built here works with this firmware
+        // version and the one before it - see main/WebServerManager.cpp::resolveAsset.
         algorithms: [
-          'gzip'
+          'brotliCompress'
         ],
         deleteOriginalAssets: true
       })
@@ -56,13 +67,17 @@ export default defineConfig(({ mode }) => {
               }
             ],
           },
-          minify: true,
+          // console/debugger statements have to be dropped here: the `esbuild.drop`
+          // option below has no effect under this rolldown/oxc pipeline, and the
+          // firmware ships the bundle inside a 128 kB littlefs partition.
+          minify: {
+            compress: { dropConsole: true, dropDebugger: true },
+          },
           polyfillRequire: false,
         }
       }
     },
     esbuild: {
-      drop: isDev ? [] : ['console', 'debugger'],
       legalComments: 'none',
     },
     server: {

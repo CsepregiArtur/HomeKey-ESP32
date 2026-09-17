@@ -17,6 +17,24 @@ This document outlines different methods for updating the firmware on your HomeK
 *   `*.firmware.bin`: The main application firmware file.
 *   `littlefs.bin`: Contains the web interface files (LittleFS filesystem).
 
+## Which version am I running?
+
+Three places report it, and they agree:
+
+* **Web UI → OTA** shows the firmware version as `Current Version`.
+* **Web UI → device info** shows the firmware version and the UI (web interface) version.
+* **Apple Home → accessory settings** shows the firmware revision.
+
+How to read the value:
+
+| Value | Meaning |
+| --- | --- |
+| `v0.9.0` | A tagged release. |
+| `0.9.0-dev+1a2b3c4` | Built from a branch, `0.9.0` being the version it is based on and `1a2b3c4` the exact commit. |
+| `0.9.0-dev+1a2b3c4-dirty` | Same, but the worktree had uncommitted changes - not a release. |
+
+The UI version is reported separately as `<app version>+<commit>` (for example `0.9.0+1a2b3c4`), because the web interface can be updated on its own.
+
 ## 1. Over-The-Air (OTA) Updates
 
 The primary method for Over-The-Air (OTA) updates is through the WebUI. This allows you to update your device wirelessly.
@@ -47,7 +65,8 @@ If everything went smoothly, you should see the "Current Version" and "Running P
 *   The `littlefs.bin` file from the [GitHub Releases page](https://github.com/rednblkx/HomeKey-ESP32/releases).
 *   The IP address of your HomeKey-ESP32 device.
 *   (Optional) The OTA password, if you've set one in the [Configuration Guide](../configuration#524-homespan-settings).
-    *   The default OTA password is `homespan-ota`
+    *   The shipped default (`homespan-ota`) is treated as "not configured": the `espota` service is **disabled** until you set your own password under `Misc → HomeSpan`. This is intentional, because that service accepts firmware uploads over the network and the default password is public. The boot log states this explicitly.
+    *   If `espota` reports "No response from Device", check that a custom OTA password is set.
 
 ### 1.2.2. Update
 
@@ -108,6 +127,55 @@ If OTA updates aren't working, or if you prefer a wired connection, you can alwa
 
 *   **Check Release Notes:** Always check the release notes on the [GitHub Releases page](https://github.com/rednblkx/HomeKey-ESP32/releases) before updating. These notes will inform you about new features, bug fixes, and any potential breaking changes or special migration steps required between versions.
 *   **Power Stability:** Ensure a stable power supply during the update process. Interrupting power during a flash can corrupt the firmware and require a full re-flash via USB.
+*   **Web UI login:** devices set up from a version that generates its own credentials ask for a username and password on the Web UI. The credentials are shown when the setup portal saves the Wi-Fi configuration and again in the boot log; see [Security]({{< ref "security" >}}) for what to do if they are lost.
+*   **Signed OTA images (optional):** releases can be built so the device only accepts signature-verified OTA images. That needs a signing key, so it is off by default - see [Security]({{< ref "security" >}}).
+
+## 4. Breaking changes
+
+These affect how an existing device is updated or accessed. None of them requires re-pairing, and none of them touches a device's stored configuration.
+
+### 4.1. Update the firmware before the filesystem image
+
+The web UI assets are brotli-compressed from this version on, because they no longer fit into the 128 kB filesystem partition as gzip. The firmware serves brotli, gzip or uncompressed assets - whichever the flashed image contains - so:
+
+* **Firmware first, then the filesystem image**: works. This is the recommended order.
+* **Filesystem image only, on older firmware**: the web UI will not load, because older firmware only looks for `.gz` assets. Recovery needs USB.
+* **Firmware only, on an older filesystem image**: works; gzip assets are still served.
+
+### 4.2. New devices ask for a Web UI login
+
+**What changed:** a device that has never been configured generates its credentials on first boot and turns Web UI authentication on.
+
+**Where to find them:** the **first-boot serial log** at 115200 baud (`pio device monitor`, or any serial terminal). It is printed once:
+
+```
+HomeKit Setup Code : 123-45-678
+Setup AP password  : <16 random characters>
+Web UI login       : admin / <16 random characters>
+OTA password       : <20 random characters>
+```
+
+The setup portal shows the Web UI login again on its success screen after saving.
+
+**If it is lost:** [Recovering from a lost credential]({{< ref "security" >}}) - the setup portal does not require a login, and erasing NVS generates a new set. Devices that are already configured are unaffected and keep their stored values, including the `HomeKey$123$` setup AP password.
+
+While a new device has no network it may show two access points - its own `HK_XXXXXX` captive portal and HomeSpan's `HomeSpan-Setup`. Both now use the generated AP password, so the shipped `HomeKey$123$` and `homespan` values do not work on a device set up from this version on.
+
+### 4.3. `espota` is off until an OTA password is set (security default change)
+
+**What changed:** the `espota` service no longer starts while the OTA password is empty or still the shipped default (`homespan-ota`), because that password is public and the service accepts firmware uploads over the network.
+
+**Who is affected:** anyone who updates over the network with `espota` (Arduino-IDE style) instead of through the Web UI. The Web UI firmware uploader is unaffected.
+
+**Fix (one line of configuration):** `Web UI → Misc → HomeSpan → OTA Password` → set an OTA password → save. The device reboots, and `espota` accepts that password from then on.
+
+### 4.4. State-changing endpoints are POST-only
+
+`/reset_hk_pair`, `/reset_wifi_cred` and `/start_config_ap` reject GET requests now. The Web UI sends POST; scripts that used GET need updating.
+
+### 4.5. Requests must use the device's IP address or its mDNS name
+
+The `Host` header is validated to block DNS rebinding, so reaching the Web UI through a custom host name, a reverse proxy or a hostname alias returns 401. Use the device's IP address or `<hostname>.local`.
 
 ---
 

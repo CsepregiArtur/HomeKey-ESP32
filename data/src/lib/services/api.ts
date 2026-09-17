@@ -23,7 +23,9 @@ export async function rebootDevice() {
 export async function resetPairings() {
   try {
     const response = await fetch(`/reset_hk_pair`, {
-      method: 'GET'
+      // POST (not GET) so that a page the user happens to visit cannot trigger this
+      // through an <img>/<script> tag or a plain link.
+      method: 'POST'
     });
 
     if (!response.ok) {
@@ -40,7 +42,8 @@ export async function resetPairings() {
 export async function resetWifi() {
   try {
     const response = await fetch("/reset_wifi_cred", {
-      method: 'GET'
+      // POST (not GET) to keep this out of reach of cross-site requests.
+      method: 'POST'
     });
 
     if (!response.ok) {
@@ -57,7 +60,8 @@ export async function resetWifi() {
 export async function startConfigAP() {
   try {
     const response = await fetch("/start_config_ap", {
-      method: 'GET'
+      // POST (not GET) to keep this out of reach of cross-site requests.
+      method: 'POST'
     });
 
     if (!response.ok) {
@@ -188,7 +192,7 @@ export async function getCaptivePortalConfig(): Promise<ApiResponse<CaptivePorta
   }
 }
 
-export async function saveCaptivePortalConfig(config: Partial<CaptivePortalConfig>): Promise<ApiResponse<{"ip_addr": string}>> {
+export async function saveCaptivePortalConfig(config: Partial<CaptivePortalConfig>): Promise<ApiResponse<{ ip_addr: string }>> {
   try {
     const response = await fetch(`/captive_portal_config`, {
       method: 'POST',

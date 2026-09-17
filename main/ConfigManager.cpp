@@ -207,6 +207,26 @@ bool ConfigManager::begin() {
   return true;
 }
 
+bool ConfigManager::hasStoredConfig() {
+  if (!m_isInitialized) {
+    return false;
+  }
+  // "MISCDATA" carries both the misc and the actions configuration, and it is the
+  // blob that persists the generated credentials, so its presence is what
+  // distinguishes an already-configured device from a factory-fresh one.
+  size_t len = 0;
+  const esp_err_t err = nvs_get_blob(m_nvsHandle, "MISCDATA", NULL, &len);
+  if (err == ESP_ERR_NVS_NOT_FOUND) {
+    return false;
+  }
+  if (err != ESP_OK) {
+    ESP_LOGW(TAG, "Could not determine whether a stored config exists (err=%04#x); assuming yes.",
+             err);
+    return true;
+  }
+  return len > 0;
+}
+
 template <typename ConfigType>
 /**
  * @brief Access the stored configuration corresponding to the requested ConfigType.
@@ -731,7 +751,14 @@ std::string ConfigManager::updateFromJson(const std::string& json_string) {
 
           if constexpr (std::is_same_v<PointeeType, std::string>) {
             if (cJSON_IsString(it)) {
-              arg->assign(it->valuestring);
+              if (espConfig::isSecretKey(keyStr) && espConfig::isMaskedSecret(it->valuestring)) {
+                // The masked placeholder above is what the UI was served; a client
+                // that echoes it back (or a stale form) must not overwrite the real
+                // secret with the literal placeholder.
+                ESP_LOGD(TAG, "Ignoring masked placeholder for secret '%s'.", keyStr.c_str());
+              } else {
+                arg->assign(it->valuestring);
+              }
             } else {
               ESP_LOGW(TAG, "Validation failed for '%s': type mismatch, expected string.", keyStr.c_str());
             }
@@ -868,8 +895,8 @@ std::string ConfigManager::serializeToJson() {
                 using PointeeType = std::remove_pointer_t<T>;
 
                 if constexpr (std::is_same_v<PointeeType, std::string>) {
-                    if(key.contains("Password") || key.contains("Passwd")){
-                        cJSON_AddStringToObject(root.get(), key.c_str(), "********");
+                    if(espConfig::isSecretKey(key)){
+                        cJSON_AddStringToObject(root.get(), key.c_str(), espConfig::MASKED_SECRET);
                     } else {
                         cJSON_AddStringToObject(root.get(), key.c_str(), arg->c_str());
                     }

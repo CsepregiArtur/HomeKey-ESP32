@@ -120,7 +120,7 @@ Below Quick Actions, settings are structured into three intuitive tabs: **HomeKi
 Configure HomeKit device identity and authentication behavior.
 
 *   **Device Name:** Name of your HomeKit accessory as seen in the Apple Home app (e.g., `HK`).
-*   **Setup Code:** 8-digit HomeKit pairing setup code (default: `46637726`).
+*   **Setup Code:** 8-digit HomeKit pairing setup code. Devices that have never been configured generate a random one on first boot (reported on the serial console); a device that already has a stored configuration keeps its existing code, which defaults to `46637726` unless it was changed.
 *   **Always Lock on HomeKey:** Forces the device into a Locked state whenever a valid HomeKey is tapped, regardless of its current lock state.
 *   **Always Unlock on HomeKey:** Forces the device into an Unlocked state whenever a valid HomeKey is tapped, regardless of its current lock state.
 *   **SmartLock Battery Reporting:** Enables battery percentage reporting to HomeKit (configurable via MQTT).
@@ -155,7 +155,7 @@ Configure GPIO pin allocations for the NFC reader, Ethernet, and HomeSpan status
     > When sharing an SPI bus between PN532/PN7161 and SPI Ethernet, ensure the SCK, MISO, and MOSI pins match.
 
 #### 5.2.4. HomeSpan Settings
-*   **OTA Password:** Password for HomeSpan command-line OTA updates.
+*   **OTA Password:** Password for HomeSpan command-line OTA updates. The `espota` service stays disabled while this is empty or still the shipped default (`homespan-ota`), because that value is public - set any password here to enable it. The Web UI firmware uploader does not use it. See [Security]({{< ref "security" >}}).
 *   **Control GPIO Pin:** Optional physical pairing/reset button pin (set to `255` if unused).
 *   **Status LED GPIO Pin:** Optional HomeSpan status indicator LED pin (set to `255` if unused).
 
@@ -166,7 +166,7 @@ Configure GPIO pin allocations for the NFC reader, Ethernet, and HomeSpan status
 Configure WebUI authentication, HTTPS SSL/TLS encryption, and certificates.
 
 #### 5.3.1. Web Authentication
-*   **Enable Web Authentication:** Protects the web interface with a username and password login prompt.
+*   **Enable Web Authentication:** Protects the web interface with a username and password login prompt. New devices turn this on at first boot with a generated password (printed once to the serial log, and re-shown by the setup portal); devices configured before that change keep their stored setting. The stored password is always shown masked, and never sent to the browser.
 *   **Username / Password:** Credentials required to log into the web interface.
 
 #### 5.3.2. HTTPS Encryption

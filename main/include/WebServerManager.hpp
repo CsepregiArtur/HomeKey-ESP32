@@ -176,6 +176,8 @@ private:
   // Utility methods
   static bool validateRequest(httpd_req_t *req, cJSON *currentData,
                               cJSON *obj);
+  /// Reject requests whose Host header does not name this device (DNS rebinding).
+  static bool hostHeaderAllowed(httpd_req_t *req);
   static WebServerManager *getInstance(httpd_req_t *req);
   static esp_err_t sendAuthFailure(httpd_req_t *req);
   static esp_err_t ws_post_handshake_cb(httpd_req_t *req);
@@ -193,6 +195,13 @@ private:
   httpd_handle_t m_server;
   static const char *TAG;
   std::string m_sessionId;
+
+  // True while the captive-portal route set is installed, i.e. while the device is
+  // in setup AP mode. That portal has to stay reachable without Web UI credentials,
+  // otherwise a user who lost the password cannot get back into their own device.
+  bool m_captivePortalMode = false;
+  // Consecutive failed Web UI logins since boot, used to slow down guessing.
+  uint32_t m_authFailureCount = 0;
 
   // Dependencies
   ConfigManager &m_configManager;

@@ -135,7 +135,9 @@ jobs:
         run: bun run build
         working-directory: data
       - name: Remove extra, only keep compressed
-        run: find dist -regex ".*\.\(html\|css\|br\|js\|json.gz\)" -delete
+        # Deletes the uncompressed originals; both compressed variants (.br and .gz)
+        # have to survive, because the firmware serves whichever the image contains.
+        run: find dist -type f \( -name '*.html' -o -name '*.css' -o -name '*.js' \) -delete
         working-directory: data
       - name: Create LittleFS Image
         run: littlefs-python create $(pwd)/dist littlefs.bin -v --fs-size=0x20000 --name-max=64 --block-size=4096

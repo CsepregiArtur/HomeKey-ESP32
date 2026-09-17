@@ -117,6 +117,12 @@ export interface CaptivePortalConfig {
   nfcFastPollingEnabled: boolean;
   /** Access Point new password */
   accessPointPassword?: string;
+  /** Whether Web UI authentication is enabled */
+  webAuthEnabled?: boolean;
+  /** Web UI username; the password is never sent back, it is reported once on save */
+  webUsername?: string;
+  /** New Web UI password; leave empty to keep the stored/generated one */
+  webPassword?: string;
 }
 
 export interface WiFiNetwork {

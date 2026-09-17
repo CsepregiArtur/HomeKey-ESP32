@@ -68,7 +68,13 @@ void end();
 
 ## API Endpoints (Routes)
 
-The server exposes the following categories of endpoints. All are subject to Basic HTTP Authentication if enabled — except the static/asset routes and the captive-portal endpoints, which are intentionally unauthenticated (the WebSocket uses session-based authentication instead).
+The server exposes the following categories of endpoints. Requests are handled as follows:
+
+*   **Basic HTTP Authentication** applies to everything when `webAuthEnabled` is set. Secret fields (`*Password`, `*Passwd`) are serialized as `********` and that placeholder is never written back to storage, so a configuration read never discloses a password.
+*   **Captive-portal endpoints are exempt** from Web UI authentication: they run before the device has any network, they are gated by the setup AP password, and they are the only way back into a device whose Web UI password was lost.
+*   **`Host` header validation** rejects requests that do not address the device itself (IP literal, `localhost` or a `.local` name). This blocks DNS rebinding, which would otherwise let a malicious web page read API responses from the user's browser.
+*   **State-changing endpoints are POST-only** so that a plain link, image or script tag on any website the user visits cannot trigger them.
+*   **Repeated failed logins are delayed** (2 s after five consecutive failures, until the next success or reboot).
 
 ### Static Content
 
@@ -88,15 +94,15 @@ These endpoints are available when the device is in Access Point configuration m
 
 *   `GET /captive_portal`: Redirects to the captive portal page.
 *   `GET /captive_portal_config`: Retrieves initial configuration options for the captive portal (NFC presets, Ethernet config, current settings).
-*   `POST /captive_portal_config`: Saves configuration from the captive portal (WiFi credentials, HomeKit setup code, NFC pins, etc.) and reboots the device.
+*   `POST /captive_portal_config`: Saves configuration from the captive portal (WiFi credentials, HomeKit setup code, NFC pins, Web UI credentials, etc.) and reboots the device. An empty `webPassword` keeps the stored password; enabling Web UI authentication without any usable password is rejected.
 *   `GET /wifi_scan`: Scans for available WiFi networks and returns a list of SSIDs with signal strength.
 
 ### System Actions
 
 *   `POST /reboot_device`: Reboots the device.
-*   `GET /reset_hk_pair`: Erases all HomeKit pairings and reader data, then reboots.
-*   `GET /reset_wifi_cred`: Erases saved Wi-Fi credentials and reboots.
-*   `GET /start_config_ap`: Stops the web server and puts the device into Wi-Fi Access Point mode for configuration.
+*   `POST /reset_hk_pair`: Erases all HomeKit pairings and reader data, then reboots.
+*   `POST /reset_wifi_cred`: Erases saved Wi-Fi credentials and reboots.
+*   `POST /start_config_ap`: Stops the web server and puts the device into Wi-Fi Access Point mode for configuration.
 
 ### Over-the-Air (OTA) Updates
 

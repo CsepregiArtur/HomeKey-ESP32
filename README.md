@@ -90,10 +90,13 @@ The following chips are supported for Ethernet:
    **Prefer a GUI?** Use the [browser-based flasher](https://espressif.github.io/esptool-js/) - no command line needed!
 
 4. **Initial Setup**
-   - Connect to the device's WiFi AP (`HomeSpan-Setup` / `homespan`)
+   - Connect to the device's WiFi AP (`HK_XXXXXX`) using the **setup AP password from the first-boot serial log** (115200 baud); devices configured before this change used `HomeKey$123$`
    - Access the web interface at `http://192.168.4.1`
-   - Configure your WiFi credentials and HomeKit setup code
-   - Pair with Apple Home using code: `466-37-726`
+   - Configure your WiFi credentials, HomeKit setup code and Web UI login
+   - Pair with Apple Home using the **Setup Code from the first-boot serial log**; devices configured before this change used `466-37-726`
+
+> [!NOTE]
+> A factory-fresh device generates unique credentials on first boot and prints them once to the serial console; the setup portal shows the Web UI login again after it saves. See [Security](docs/content/security.md) - including what to do if you lose them.
 
 5. **Start Using HomeKey!**
    - Hold your iPhone or Apple Watch near the NFC reader
@@ -102,6 +105,8 @@ The following chips are supported for Ethernet:
 ### Updating
 
 Follow the update in the documentation at: https://rednblkx.github.io/HomeKey-ESP32/updates/
+
+Review [CHANGELOG.md](CHANGELOG.md) before updating: some releases change security defaults or the update procedure itself (for example, the firmware has to be updated before the filesystem image). The [Security](docs/content/security.md) page explains the credentials a new device generates on first boot and how to recover them.
 
 ## System Architecture
 

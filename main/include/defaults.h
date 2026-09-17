@@ -48,9 +48,16 @@
 #define C_UNKNOWN 25
 
 // Miscellaneous
+//
+// The secrets below are compile-time defaults only. On a device that has never
+// stored a configuration (first boot) the firmware replaces the Setup Code and
+// the OTA password with randomly generated per-device values - see securityInit()
+// in main.cpp. The shipped OTA password is treated as "not configured": while it
+// is unchanged the HomeSpan OTA service stays disabled, because it is a firmware
+// upload endpoint that anybody on the network could otherwise use.
 #define HOMEKEY_COLOR TAN
 #define SETUP_CODE "46637726"  // HomeKit Setup Code (only for reference, has to be changed during WiFi Configuration or from WebUI)
-#define OTA_PWD "homespan-ota" //custom password for ota
+#define OTA_PWD "homespan-ota" // Custom password for the HomeSpan OTA service; this shipped value means "not configured"
 #define DEVICE_NAME "HK" //Device name
 #define HOMEKEY_ALWAYS_UNLOCK 0 // Flag indicating if a successful Homekey authentication should always set and publish the unlock state
 #define HOMEKEY_ALWAYS_LOCK 0  // Flag indicating if a successful Homekey authentication should always set and publish the lock state
@@ -68,7 +75,8 @@
 #define BTR_PROX_BAT_ENABLED false // Enable or disable battery monitoring
 #define BTR_PROX_BAT_LOW_THRESHOLD 10 // Battery low status threshold percentage
 
-#define AP_PASSWORD "HomeKey$123$"
+#define AP_PASSWORD "HomeKey$123$" // Setup AP password; replaced by a random value on first boot
+#define AP_IDLE_CYCLE_MIN 10 // Restart the setup AP after this many minutes with no connected client (0 = never)
 
 // Ethernet Settings
 #define ETH_ENABLED false // Enable or disable Ethernet connectivity
@@ -130,7 +138,10 @@
 #define HK_DUMB_SWITCH_MODE true // Bypass lock state external validation
 
 // WebUI
+// WEB_AUTH_ENABLED is the default for a device with no stored configuration:
+// first boot switches it on and generates a random password, so "admin/password"
+// never protects a live device. Existing devices keep whatever they have stored.
 #define WEB_AUTH_ENABLED false
 #define WEB_AUTH_USERNAME "admin"
-#define WEB_AUTH_PASSWORD "password"
+#define WEB_AUTH_PASSWORD "password" // Shipped placeholder; replaced by a random value on first boot
 #define NFC_ACTIVE_PRESET 255 // NFC preset index (255 for custom pins)

@@ -18,6 +18,40 @@
 // Named constant for unset pin configurations
 inline constexpr uint8_t PIN_UNSET = 255;
 
+// Helpers shared by the configuration serialization and the code that consumes it.
+// They live in espConfig so both paths resolve to the same names and can never
+// disagree about which fields are secret.
+namespace espConfig {
+
+/**
+ * @brief Placeholder sent that replaces secret values on their way out of the device.
+ *
+ * Any configuration key whose name contains "Password" or "Passwd" is serialized
+ * as this value instead of the stored secret, so the Web UI (and anything else with
+ * access to the API) can render a filled-in password field without the device ever
+ * disclosing the password. The write path treats this value as "unchanged" and
+ * refuses to store it, so it can never overwrite a real secret.
+ */
+inline constexpr const char *MASKED_SECRET = "********";
+
+/** @brief True when the string is the masked placeholder rather than a real secret. */
+inline bool isMaskedSecret(const std::string &value) {
+  return value == MASKED_SECRET;
+}
+
+/**
+ * @brief True for configuration keys that hold a secret and must never be echoed back.
+ *
+ * Uses the same rule as serialization (substring match) so the read and write
+ * paths can never disagree about which fields are secret.
+ */
+inline bool isSecretKey(const std::string &key) {
+  return key.find("Password") != std::string::npos ||
+         key.find("Passwd") != std::string::npos;
+}
+
+} // namespace espConfig
+
 enum HK_COLOR { TAN, GOLD, SILVER, BLACK };
 enum class gpioMomentaryStateStatus : uint8_t {
   M_DISABLED = 0,

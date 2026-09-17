@@ -98,6 +98,79 @@ def _idf_build_env():
     return build_env
 
 
+def _web_ui_payload_bytes():
+    """Total size of the files that go into the littlefs image."""
+    source_dir = os.path.join(env.subst("$PROJECT_DIR"), "data", "dist")  # noqa: F821
+    if not os.path.isdir(source_dir):
+        return None
+    return sum(
+        os.path.getsize(os.path.join(root, name))
+        for root, _dirs, files in os.walk(source_dir)
+        for name in files
+    )
+
+
+def _check_web_ui_capacity():
+    """Report how much of the littlefs partition the web UI assets use.
+
+    littlefs is mounted with 4 KiB blocks (esp_littlefs hardcodes that for ESP32),
+    so the last block of every asset is partly wasted and the filesystem also keeps
+    metadata pairs and other bookkeeping. Measured on this project: of a 0x20000
+    partition, a payload of 108,232 bytes fits while 108,577 bytes fails, i.e. the
+    missing slack is a little under 20 KiB. Overshooting it fails deep inside
+    littlefs-python with a bare "LittleFSError -28: LFS_ERR_NOSPC", so report the
+    budget up front instead.
+    """
+    payload = _web_ui_payload_bytes()
+    if payload is None:
+        return
+    partition_size = _partition_size(PARTITION_NAME)
+    if not partition_size:
+        return
+
+    # Filesystem bookkeeping that is unavailable to stored data (see docstring).
+    overhead = 20 * 1024
+    budget = partition_size - overhead
+    headroom = budget - payload
+    print(
+        "Web UI payload: %.1f kB; usable in the %s partition: %.1f kB "
+        "(headroom %.1f kB)"
+        % (
+            payload / 1024.0,
+            PARTITION_NAME,
+            budget / 1024.0,
+            headroom / 1024.0,
+        )
+    )
+    if headroom < 0:
+        print(
+            "Warning: the web UI assets do not fit in the '%s' partition "
+            "(littlefs uses 4 KiB blocks). The image build will fail with "
+            "'LFS_ERR_NOSPC' - trim the assets or change the partition layout."
+            % PARTITION_NAME
+        )
+    elif headroom < 2048:
+        print(
+            "Note: very little headroom left in the '%s' partition; the next "
+            "asset growth will break the build." % PARTITION_NAME
+        )
+
+
+def _partition_size(name):
+    """Size of a partition as declared in the partition CSV."""
+    csv_path = env.subst("$PARTITIONS_TABLE_CSV")  # noqa: F821
+    if not csv_path or not os.path.isfile(csv_path):
+        return None
+    with open(csv_path) as handle:
+        for line in handle:
+            tokens = [t.strip() for t in line.split(",")]
+            if len(tokens) < 5 or tokens[0].startswith("#"):
+                continue
+            if tokens[0] == name:
+                return _parse_size(tokens[4])
+    return None
+
+
 def _build_web_ui_image():
     """Produce $BUILD_DIR/spiffs.bin with ESP-IDF's own image builder.
 
@@ -115,10 +188,20 @@ def _build_web_ui_image():
     ):
         return
 
+    _check_web_ui_capacity()
     print("Building the littlefs web UI image (ESP-IDF: %s) ..." % IMAGE_TARGET)
-    subprocess.check_call(
-        [ninja, "-C", build_dir, IMAGE_TARGET], env=_idf_build_env()
-    )
+    try:
+        subprocess.check_call(
+            [ninja, "-C", build_dir, IMAGE_TARGET], env=_idf_build_env()
+        )
+    except subprocess.CalledProcessError as exc:
+        print(
+            "\nFailed to build the littlefs web UI image (%s).\n"
+            "If the log above ends in 'LFS_ERR_NOSPC', the assets in data/dist "
+            "no longer fit the 4 KiB-block littlefs partition - see the payload "
+            "budget printed above.\n" % exc
+        )
+        raise
 
 
 def _add_filesystem_image():

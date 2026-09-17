@@ -13,9 +13,12 @@
 #include "HardwareManager.hpp"
 #include "MqttManager.hpp"
 #include "WebServerManager.hpp"
+#include <algorithm>
+#include <array>
 #include <functional>
 #include <sodium/crypto_sign.h>
 #include <sodium/crypto_box.h>
+#include <sodium/randombytes.h>
 #include "HAP.h"
 #include "loggable.hpp"
 #include "loggable_espidf.hpp"
@@ -35,6 +38,143 @@ std::unique_ptr<NfcManager> nfcManager;
 static dns_server_handle_t dns_server = NULL;
 
 bool pollHS = false;
+
+// ============================================================================
+// First-boot security defaults
+// ============================================================================
+
+namespace {
+
+// Ambiguous glyphs (0/O, 1/l/I) are left out: these passwords are meant to be
+// copied off a serial console or a setup page by hand.
+constexpr char kPasswordAlphabet[] =
+    "abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+
+constexpr size_t kPasswordAlphabetSize = sizeof(kPasswordAlphabet) - 1;
+
+/// Setup Code generated on first boot, to be handed to HomeSpan once it is running.
+std::string pendingSetupCode;
+
+std::string randomPassword(size_t length) {
+  std::string out(length, '\0');
+  std::array<uint8_t, 32> buffer{};
+  size_t written = 0;
+  while (written < length) {
+    randombytes_buf(buffer.data(), buffer.size());
+    for (uint8_t byte : buffer) {
+      // Rejection sampling keeps the distribution uniform although the alphabet
+      // size does not divide 256. It also makes modulo bias impossible.
+      if (byte >= 256 - (256 % kPasswordAlphabetSize)) {
+        continue;
+      }
+      out[written++] = kPasswordAlphabet[byte % kPasswordAlphabetSize];
+      if (written == length) {
+        break;
+      }
+    }
+  }
+  return out;
+}
+
+bool isWeakSetupCode(const std::string &code) {
+  static constexpr std::array<const char *, 12> kWeakCodes = {
+      "00000000", "11111111", "22222222", "33333333", "44444444", "55555555",
+      "66666666", "77777777", "88888888", "99999999", "12345678", "87654321"};
+  return std::find(kWeakCodes.begin(), kWeakCodes.end(), code) != kWeakCodes.end();
+}
+
+/// Random HAP-valid Setup Code: 8 digits, no leading zero, none of the trivial patterns.
+std::string randomSetupCode() {
+  std::string code;
+  std::array<uint8_t, 8> digits{};
+  do {
+    randombytes_buf(digits.data(), digits.size());
+    code.clear();
+    code += static_cast<char>('1' + (digits[0] % 9)); // HAP rejects a leading zero
+    for (size_t i = 1; i < digits.size(); ++i) {
+      code += static_cast<char>('0' + (digits[i] % 10));
+    }
+  } while (isWeakSetupCode(code));
+  return code;
+}
+
+} // namespace
+
+/**
+ * @brief Replace the shipped credentials with per-device ones on a factory-fresh device.
+ *
+ * Every default this firmware ships with (HomeKit Setup Code, setup AP password,
+ * OTA password, Web UI credentials and access point password) is published in the
+ * source repository, so a device that keeps them can be paired with, reconfigured
+ * or reflashed by anybody who can reach it over the network.
+ *
+ * Enabling device-wide protections such as flash encryption would require erasing
+ * the flash and re-provisioning every already-deployed device, which is not an
+ * option here. Generating the secrets only on first boot, on the other hand, needs
+ * no migration: as soon as a configuration blob exists in NVS the stored values win
+ * and this function never touches the credentials again - it only reports how the
+ * device is configured so the remaining factory defaults are visible in the log.
+ *
+ * Must run before the Web UI, MQTT and HomeSpan are started so that everything
+ * comes up using the freshly generated values. The Setup Code is the one exception:
+ * HomeSpan owns the SRP verification data, so the generated code is queued in
+ * pendingSetupCode and applied once HomeSpan is running.
+ */
+static void securityInit() {
+  static const char *TAG = "Security";
+  const espConfig::misc_config_t &misc = configManager.getConfig<espConfig::misc_config_t>();
+
+  if (!configManager.hasStoredConfig()) {
+    const std::string setupCode = randomSetupCode();
+    const std::string apPassword = randomPassword(16);
+    const std::string otaPassword = randomPassword(20);
+    const std::string webPassword = randomPassword(16);
+    const std::string payload = fmt::format(
+        "{{\"setupCode\":\"{}\",\"accessPointPassword\":\"{}\",\"otaPasswd\":\"{}\","
+        "\"webAuthEnabled\":true,\"webUsername\":\"{}\",\"webPassword\":\"{}\"}}",
+        setupCode, apPassword, otaPassword, WEB_AUTH_USERNAME, webPassword);
+
+    if (!configManager.updateFromJson<espConfig::misc_config_t>(payload).empty() &&
+        configManager.saveConfig<espConfig::misc_config_t>()) {
+      pendingSetupCode = setupCode;
+      ESP_LOGW(TAG, "================= FIRST BOOT: GENERATED CREDENTIALS =================");
+      ESP_LOGW(TAG, "This device now has unique credentials. Write them down:");
+      ESP_LOGW(TAG, "  HomeKit Setup Code : %.3s-%.2s-%.3s", setupCode.c_str(), setupCode.c_str() + 3, setupCode.c_str() + 5);
+      ESP_LOGW(TAG, "  Setup AP password  : %s", apPassword.c_str());
+      ESP_LOGW(TAG, "  Web UI login       : %s / %s", WEB_AUTH_USERNAME, webPassword.c_str());
+      ESP_LOGW(TAG, "  OTA password       : %s", otaPassword.c_str());
+      ESP_LOGW(TAG, "The Web UI password can be changed under Misc -> Security.");
+      ESP_LOGW(TAG, "=====================================================================");
+      return;
+    }
+    ESP_LOGE(TAG, "Failed to store the generated credentials; falling back to the compiled defaults.");
+  }
+
+  // Already-configured device: report anything that is still on a shipped default
+  // instead of changing it behind the user's back.
+  if (misc.otaPasswd.empty() || misc.otaPasswd == OTA_PWD) {
+    ESP_LOGW(TAG, "HomeSpan OTA is disabled while the OTA password is the shipped default. "
+                  "Set your own under Misc -> HomeSpan to enable it.");
+  }
+  if (misc.accessPointPassword == AP_PASSWORD) {
+    ESP_LOGW(TAG, "The setup access point still uses the password published in the source "
+                  "repository. Change it in the setup portal or under Misc -> Security.");
+  }
+  if (misc.setupCode == SETUP_CODE) {
+    ESP_LOGW(TAG, "The HomeKit Setup Code is still the shipped default and is public. "
+                  "Change it while no controller is paired.");
+  }
+  if (!misc.webAuthEnabled) {
+    ESP_LOGW(TAG, "Web UI authentication is disabled: anyone who can reach this device on the "
+                  "network can read its configuration, reset the pairing and flash firmware. "
+                  "Enable a username/password under Misc -> Security.");
+  }
+#if CONFIG_SECURE_SIGNED_APPS_NO_SECURE_BOOT
+  ESP_LOGI(TAG, "OTA images are signature verified (signed apps, no secure boot).");
+#else
+  ESP_LOGI(TAG, "OTA images are not signature verified; see docs/content/security.md to enable it.");
+#endif
+}
 
 static void dhcp_set_captiveportal_url(void) {
     esp_netif_ip_info_t ip_info;
@@ -81,8 +221,30 @@ std::function<void(int)> lambda = [](int status) {
     WiFi.softAP(macStr.c_str(), misc.accessPointPassword.c_str(), 11, false, 2, false, WIFI_AUTH_WPA2_WPA3_PSK, WIFI_CIPHER_TYPE_AES_CMAC128); 
     start_captive_portal();
     webServerManager.begin();
+    // The setup AP exists so that a device without Wi-Fi credentials can still be
+    // configured, but it has no reason to stay on the air forever. Cycling it while
+    // nobody is connected shortens the window in which it can be attacked, and it
+    // never interrupts an actual configuration session because a connected client
+    // resets the counter.
+#if AP_IDLE_CYCLE_MIN > 0
+    uint32_t idleSeconds = 0;
+#endif
     while(true){
+#if AP_IDLE_CYCLE_MIN > 0
+      vTaskDelay(pdMS_TO_TICKS(1000));
+      if(WiFi.softAPgetStationNum() > 0){
+        idleSeconds = 0;
+      } else if(++idleSeconds >= (uint32_t)(AP_IDLE_CYCLE_MIN * 60)){
+        idleSeconds = 0;
+        ESP_LOGW("Main", "Setup AP idle for %d min with no client - restarting it.", AP_IDLE_CYCLE_MIN);
+        WiFi.softAPdisconnect(true);
+        vTaskDelay(pdMS_TO_TICKS(1000));
+        WiFi.softAP(macStr.c_str(), configManager.getConfig<espConfig::misc_config_t>().accessPointPassword.c_str(), 11, false, 2, false, WIFI_AUTH_WPA2_WPA3_PSK, WIFI_CIPHER_TYPE_AES_CMAC128);
+        dhcp_set_captiveportal_url();
+      }
+#else
       vTaskDelay(pdMS_TO_TICKS(100));
+#endif
     }
   }
 };
@@ -172,6 +334,9 @@ void setup() {
   }
 
   configManager.begin();
+  // Must happen before any manager starts so the Web UI, MQTT and HomeSpan all
+  // come up using the credentials this generates on a factory-fresh device.
+  securityInit();
   hardwareManager = std::make_unique<HardwareManager>(configManager.getConfig<espConfig::actions_config_t>());
   lockManager = std::make_unique<LockManager>(configManager.getConfig<espConfig::misc_config_t>(), configManager.getConfig<espConfig::actions_config_t>());
   mqttManager = std::make_unique<MqttManager>(configManager);
@@ -216,6 +381,15 @@ void setup() {
   webServerManager.setMqttManager(mqttManager.get());
   hardwareManager->begin();
   homekitLock->begin();
+  // HomeSpan keeps the SRP verification data for the Setup Code in its own NVS
+  // namespace, so a code generated on first boot has to be handed over once
+  // HomeSpan is running. Doing it here also means it happens exactly once instead
+  // of regenerating SRP data on every boot.
+  if (!pendingSetupCode.empty()) {
+    ESP_LOGI("Main", "Applying the generated HomeKit Setup Code.");
+    homeSpan.setPairingCode(pendingSetupCode.c_str(), false);
+    pendingSetupCode.clear();
+  }
   lockManager->begin();
   pollHS = true;
 }

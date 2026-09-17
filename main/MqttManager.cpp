@@ -142,6 +142,12 @@ bool MqttManager::begin(std::string deviceID) {
         }
     } else {
         mqtt_cfg.broker.address.transport = MQTT_TRANSPORT_OVER_TCP;
+        // Worth repeating on every connect: the MQTT topics below can drive the lock,
+        // so without TLS both the broker credentials and the unlock commands are
+        // readable and forgeable by anything on the path.
+        ESP_LOGW(TAG, "MQTT TLS is disabled: credentials and lock commands are sent in the "
+                      "clear. Enable SSL/TLS and validate the broker certificate if the "
+                      "broker is reachable from anywhere but a trusted LAN.");
     }
     
     mqtt_cfg.credentials.client_id = m_mqttConfig.mqttClientId.c_str();

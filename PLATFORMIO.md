@@ -89,6 +89,57 @@ and pinned in `dependencies.lock` on the first build.
 Result: `pio run -t upload` flashes the complete device in one command.
 
 
+## Versioning
+
+Two values have to be bumped together when cutting a release, and a tag keeps builds
+identifiable on a running device:
+
+* `HK_APP_VERSION` in the root `CMakeLists.txt` - the application version an untagged
+  build reports.
+* `version` in `data/package.json` - the web interface version, shown in the device info
+  panel as `<version>+<commit>`.
+
+What a build reports:
+
+| Build | Version string |
+| --- | --- |
+| From a release tag (`v0.9.0`) | `v0.9.0` (via `git describe --tags`) |
+| From a branch with no reachable tag | `0.9.0-dev+<commit>` |
+| ... and with uncommitted changes | `0.9.0-dev+<commit>-dirty` |
+
+The value is visible in the Web UI (OTA page and device info panel) and in HomeKit as the
+firmware revision. Tag releases as `vX.Y.Z`: `wiki.yml` publishes every `v*` tag that
+contains a `docs/` directory under `/<tag>/`, which is what the version switcher in
+`docs/hugo.yaml` links to. Add a matching section to `CHANGELOG.md`.
+
+## Web UI payload budget
+
+The web UI is served from the `spiffs` partition (0x20000, 128 kB) as pre-compressed
+files, and littlefs is mounted with 4 KiB blocks (esp_littlefs hardcodes that, because
+ESP32 flash erases in 4 KiB sectors). That leaves roughly 108 kB for assets, so the
+space is genuinely tight:
+
+* The assets are brotli-compressed (`data/vite.config.ts`). Brotli is ~17% smaller
+  than gzip here (91 kB vs 110 kB), which is the only reason the modern UI still fits.
+  Shipping both encodings would need about 200 kB and is not an option.
+* The firmware serves brotli, gzip or uncompressed files, whichever the flashed image
+  contains (`resolveAsset()` in `main/WebServerManager.cpp`), so firmware and
+  filesystem image can be updated independently - but updating *only* the image onto
+  older firmware leaves the UI unable to load, because the old firmware only looks for
+  `.gz`. Update the firmware first; this is documented under "Breaking changes" in
+  `docs/content/updates.md`.
+* `scripts/pio_post_flash_fs.py` prints the payload against the usable budget on every
+  build and warns when the headroom gets thin. Without it, overshooting shows up as a
+  bare `LittleFSError -28: LFS_ERR_NOSPC` from inside littlefs-python.
+* After changing anything under `data/`, rebuild the assets before building the
+  firmware, because the littlefs image is generated from `data/dist`:
+
+  ```bash
+  cd data && npm run build && find dist \( -name '*.css' -o -name '*.js' \) -delete
+  ```
+
+  (Only the compressed files are kept; the firmware never serves the originals.)
+
 ## Known differences to the `idf.py` build
 
 * `build_unflags` removes the `-DFMT_THROW(x)=...` option that

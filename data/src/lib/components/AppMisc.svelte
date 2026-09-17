@@ -485,6 +485,7 @@
 									<input
 										type="password"
 										bind:value={miscConfig.otaPasswd}
+										placeholder="Set a custom password to enable OTA"
 										class="input input-sm input-bordered w-full"
 									/>
 								</div>
@@ -525,6 +526,18 @@
 									<p class="text-xs text-base-content/60">Configure web interface authentication settings.</p>
 								</div>
 
+								{#if !miscConfig.webAuthEnabled}
+									<div class="alert alert-warning py-2 px-3 items-start gap-2">
+										<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 shrink-0 stroke-current" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+											<path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+										</svg>
+										<span class="text-xs">
+											Anyone on the network can read the configuration, reset the pairing and
+											flash firmware. Enabling authentication is recommended.
+										</span>
+									</div>
+								{/if}
+
 								<div class="flex items-center justify-between py-2 px-3 bg-base-100 rounded-lg">
 									<div>
 										<p class="text-sm font-medium">Enable Web Authentication</p>
@@ -562,6 +575,9 @@
 												placeholder="••••••••"
 												class="input input-sm input-bordered w-full"
 											/>
+											<p class="text-xs text-base-content/60 mt-1">
+												Shown masked; leave unchanged to keep it.
+											</p>
 										</div>
 									</div>
 								{/if}

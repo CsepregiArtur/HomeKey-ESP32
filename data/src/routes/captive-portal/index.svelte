@@ -30,7 +30,10 @@
 		ethSpiConfig: [20, -1, -1, -1, -1, -1, -1],
     overrideStrappingRestriction: false,
     nfcFastPollingEnabled: false,
-    accessPointPassword: ""
+    accessPointPassword: "",
+    webAuthEnabled: false,
+    webUsername: "admin",
+    webPassword: ""
 	});
 	// svelte-ignore state_referenced_locally
 	let config = $state<CaptivePortalConfig>($state.snapshot(config_initial));
@@ -390,6 +393,50 @@
 							disabled={loading}
 						/>
 					</div>
+
+					<!-- Web UI authentication -->
+					<div class="flex items-center justify-between py-2 px-3 bg-base-100 rounded-lg">
+						<div>
+							<p class="text-sm font-medium">Enable Web UI authentication</p>
+						</div>
+						<input
+							type="checkbox"
+							bind:checked={config.webAuthEnabled}
+							class="toggle toggle-primary toggle-sm"
+							disabled={loading}
+						/>
+					</div>
+
+					{#if config.webAuthEnabled}
+						<div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+							<div class="form-control">
+								<label class="label" for="webUsername">
+									<span class="label-text font-medium">Web UI Username</span>
+								</label>
+								<input
+									type="text"
+									id="webUsername"
+									bind:value={config.webUsername}
+									placeholder="admin"
+									class="input input-bordered w-full"
+									disabled={loading}
+								/>
+							</div>
+							<div class="form-control">
+								<label class="label" for="webPassword">
+									<span class="label-text font-medium">Web UI Password</span>
+								</label>
+								<input
+									type="password"
+									id="webPassword"
+									bind:value={config.webPassword}
+									placeholder="Leave empty to keep the current one"
+									class="input input-bordered w-full"
+									disabled={loading}
+								/>
+							</div>
+						</div>
+					{/if}
 
 					<!-- HomeKit Setup Code -->
 					<div class="form-control">

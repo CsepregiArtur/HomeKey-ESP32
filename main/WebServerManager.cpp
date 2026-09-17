@@ -40,6 +40,9 @@
 #include <cstring>
 #include <dirent.h>
 #include <esp_app_desc.h>
+#include <esp_netif.h>
+#include <cctype>
+#include <cstdio>
 #include <mutex>
 #include <esp_tls_crypto.h>
 #include <stdbool.h>
@@ -249,6 +252,13 @@ void WebServerManager::begin() {
   } else{
     ESP_LOGI(TAG, "LittleFS mounted: %d/%d bytes", LittleFS.usedBytes(),
             LittleFS.totalBytes());
+    // Assets are stored compressed (brotli or gzip, depending on the release that
+    // built the image). Neither present means the filesystem image was never
+    // flashed - worth saying out loud, because the Web UI is then a blank 404.
+    if (!LittleFS.exists("/index.html.br") && !LittleFS.exists("/index.html.gz")) {
+      ESP_LOGW(TAG, "No web UI assets in the filesystem partition; flash the littlefs "
+                    "image (see docs/content/updates.md).");
+    }
   }
   wifi_mode_t currentMode;
   esp_err_t wifiErr = esp_wifi_get_mode(&currentMode);
@@ -383,8 +393,191 @@ void WebServerManager::end() {
   ESP_LOGI(TAG, "WebServerManager ended");
 }
 
+namespace {
+
+/// Branch-free comparison of fixed-size secrets, so the login check cannot leak a
+/// matching prefix through response timing.
+bool constantTimeEquals(const std::string &a, const std::string &b) {
+  if (a.size() != b.size()) {
+    return false;
+  }
+  uint8_t diff = 0;
+  for (size_t i = 0; i < a.size(); ++i) {
+    diff |= static_cast<uint8_t>(a[i] ^ b[i]);
+  }
+  return diff == 0;
+}
+
+/// True when the value looks like an IPv4 literal ("192.168.4.1", not a host name).
+bool isIpv4Literal(const std::string &value) {
+  unsigned a = 0, b = 0, c = 0, d = 0;
+  char trailing = '\0';
+  if (sscanf(value.c_str(), "%u.%u.%u.%u%c", &a, &b, &c, &d, &trailing) != 4) {
+    return false;
+  }
+  return a < 256 && b < 256 && c < 256 && d < 256;
+}
+
+std::string toLowerCopy(std::string value) {
+  std::transform(value.begin(), value.end(), value.begin(),
+                 [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+  return value;
+}
+
+/** A static asset as it is actually stored, plus the encoding it is stored in. */
+struct AssetVariant {
+  std::string path;        ///< Path inside LittleFS; empty when the asset is missing
+  const char *encoding;    ///< Value for Content-Encoding, nullptr when stored uncompressed
+};
+
+/**
+ * @brief Read the encodings the client accepts from the Accept-Encoding header.
+ *
+ * A substring match is deliberate: "br" also matches "brotli", which some clients
+ * send, and being generous here only means a compressed variant is chosen when it
+ * exists.
+ */
+void parseAcceptEncoding(httpd_req_t *req, bool &acceptBrotli, bool &acceptGzip) {
+  acceptBrotli = false;
+  acceptGzip = false;
+  const size_t len = httpd_req_get_hdr_value_len(req, "Accept-Encoding");
+  if (len == 0 || len >= 256) {
+    return;
+  }
+  char header[256];
+  if (httpd_req_get_hdr_value_str(req, "Accept-Encoding", header, sizeof(header)) != ESP_OK) {
+    return;
+  }
+  acceptBrotli = strstr(header, "br") != nullptr;
+  acceptGzip = strstr(header, "gzip") != nullptr;
+}
+
+/**
+ * @brief Pick the best stored variant of a static asset.
+ *
+ * The web UI ships pre-compressed: brotli from the version that ran out of space in
+ * the littlefs partition, gzip before that. Which one an image contains therefore
+ * depends on the firmware version that built it, and the two can be updated
+ * independently (firmware via OTA, assets via the LittleFS upload). Trying both
+ * keeps every combination working, and the uncompressed fallback covers images
+ * built without compression at all.
+ *
+ * When the client cannot decode the only available variant, the file is still
+ * served with its real Content-Encoding header: a 404 would be strictly worse, and
+ * a client that cannot decode brotli could not render that asset regardless.
+ */
+AssetVariant resolveAsset(const std::string &path, bool acceptBrotli, bool acceptGzip) {
+  const bool haveBrotli = LittleFS.exists((path + ".br").c_str());
+  const bool haveGzip = LittleFS.exists((path + ".gz").c_str());
+  if (haveBrotli && acceptBrotli) {
+    return {path + ".br", "br"};
+  }
+  if (haveGzip && acceptGzip) {
+    return {path + ".gz", "gzip"};
+  }
+  if (haveBrotli) {
+    return {path + ".br", "br"};
+  }
+  if (haveGzip) {
+    return {path + ".gz", "gzip"};
+  }
+  if (LittleFS.exists(path.c_str())) {
+    return {path, nullptr};
+  }
+  return {"", nullptr};
+}
+
+/**
+ * @brief True for the URIs whose handlers only accept POST.
+ *
+ * They fall through to the single-page-app catch-all handler for any other method,
+ * which would answer a GET with the app shell and status 200 - indistinguishable from
+ * a successful call for anything scripting against the API. The query string is
+ * ignored, so "/reset_hk_pair?x=1" is matched too.
+ */
+bool isStateChangingEndpoint(const char *uri) {
+  static constexpr std::array<const char *, 4> kPaths = {
+      "/reboot_device", "/reset_hk_pair", "/reset_wifi_cred", "/start_config_ap"};
+  for (const char *path : kPaths) {
+    const size_t len = strlen(path);
+    if (strncmp(uri, path, len) == 0 && (uri[len] == '\0' || uri[len] == '?')) {
+      return true;
+    }
+  }
+  return false;
+}
+
+} // namespace
+
+/**
+ * @brief Reject requests whose Host header does not name this device.
+ *
+ * The whole API is meant to be reached directly on the local network, but a browser
+ * does not know that: a hostile page can point a host name it controls at the
+ * device's IP address and then read the answers, because from the browser's point of
+ * view the request is same-origin (DNS rebinding). The Host header is the part an
+ * attacker cannot forge, so only IP literals, "localhost" and names that resolve
+ * on-link (mDNS ".local") are accepted.
+ */
+bool WebServerManager::hostHeaderAllowed(httpd_req_t *req) {
+  const size_t len = httpd_req_get_hdr_value_len(req, "Host");
+  if (len == 0) {
+    return true; // HTTP/1.0 request without a Host header (cannot be a rebinding attack)
+  }
+  if (len >= 64) {
+    return false;
+  }
+  char host[64];
+  if (httpd_req_get_hdr_value_str(req, "Host", host, sizeof(host)) != ESP_OK) {
+    return false;
+  }
+  std::string name(host);
+  const size_t colon = name.find(':');
+  if (colon != std::string::npos) {
+    name.erase(colon); // strip the port
+  }
+  name = toLowerCopy(name);
+  if (name.empty()) {
+    return false;
+  }
+  if (isIpv4Literal(name) || name == "localhost") {
+    return true;
+  }
+  if (name.front() == '[') {
+    return true; // IPv6 literal such as [::1]
+  }
+  // mDNS names are answered on-link only, so accepting them does not open the
+  // rebinding hole: a remote attacker cannot answer an mDNS query.
+  if (name.size() > 6 && name.compare(name.size() - 6, 6, ".local") == 0) {
+    return true;
+  }
+  for (const char *ifKey : {"WIFI_STA_DEF", "WIFI_AP_DEF"}) {
+    esp_netif_t *netif = esp_netif_get_handle_from_ifkey(ifKey);
+    if (!netif) {
+      continue;
+    }
+    const char *netifHostname = nullptr;
+    if (esp_netif_get_hostname(netif, &netifHostname) == ESP_OK &&
+        netifHostname != nullptr && netifHostname[0] != '\0') {
+      const std::string candidate = toLowerCopy(netifHostname);
+      if (name == candidate) {
+        return true;
+      }
+    }
+  }
+  ESP_LOGW(TAG, "Rejected request with unexpected Host header '%s'", name.c_str());
+  return false;
+}
+
 bool WebServerManager::basicAuth(httpd_req_t* req){
-  if(!m_configManager.getConfig<espConfig::misc_config_t>().webAuthEnabled){
+  if(!hostHeaderAllowed(req)){
+    return false;
+  }
+  // The setup portal runs before any Wi-Fi (and therefore any Web UI credentials)
+  // exist, and it is already gated by the setup AP password. Requiring Web UI auth
+  // here would lock a user who lost the password out of their own device, since the
+  // portal is the only way back in.
+  if(m_captivePortalMode || !m_configManager.getConfig<espConfig::misc_config_t>().webAuthEnabled){
     return true;
   }
   size_t hdr_len = httpd_req_get_hdr_value_len(req, "Authorization");
@@ -403,7 +596,18 @@ bool WebServerManager::basicAuth(httpd_req_t* req){
   std::string digest = "Basic ";
   digest.resize(6+n);
   esp_crypto_base64_encode((uint8_t *)digest.data() + 6, digest.size(), &n, (const uint8_t *)cred.c_str(), cred.size());
-  return authReq == digest;
+  if (constantTimeEquals(authReq, digest)) {
+    m_authFailureCount = 0;
+    return true;
+  }
+  // The credentials are static, so guessing only needs time. Slow it down without
+  // introducing a persistent lockout that a user could get stuck in.
+  if (++m_authFailureCount >= 5) {
+    ESP_LOGW(TAG, "%lu failed Web UI logins - delaying the response",
+             static_cast<unsigned long>(m_authFailureCount));
+    vTaskDelay(pdMS_TO_TICKS(2000));
+  }
+  return false;
 }
 
 // ============================================================================
@@ -445,6 +649,8 @@ esp_err_t WebServerManager::ws_post_handshake_cb(httpd_req_t *req) {
 void WebServerManager::setupRoutes() {
   ESP_LOGI(TAG, "Setting up routes...");
 
+  m_captivePortalMode = false;
+
   struct RouteConfig {
     const char *uri;
     httpd_method_t method;
@@ -465,11 +671,13 @@ void WebServerManager::setupRoutes() {
       {"/eth_get_config", HTTP_GET, handleGetEthConfig, this},
       {"/nfc_get_presets", HTTP_GET, handleGetNfcPresets, this},
 
-      // Action endpoints
+      // Action endpoints. State changes are POST-only: a plain GET is reachable
+      // from any page the user happens to visit, which must not be able to reset
+      // the HomeKit pairing or force the device into setup mode (CSRF).
       {"/reboot_device", HTTP_POST, handleReboot, this},
-      {"/reset_hk_pair", HTTP_GET, handleHKReset, this},
-      {"/reset_wifi_cred", HTTP_GET, handleWifiReset, this},
-      {"/start_config_ap", HTTP_GET, handleStartConfigAP, this},
+      {"/reset_hk_pair", HTTP_POST, handleHKReset, this},
+      {"/reset_wifi_cred", HTTP_POST, handleWifiReset, this},
+      {"/start_config_ap", HTTP_POST, handleStartConfigAP, this},
 
       // WebSocket
       {"/ws", HTTP_GET, handleWebSocket, this, true},
@@ -510,6 +718,10 @@ void WebServerManager::setupRoutes() {
 
 void WebServerManager::setupCaptivePortalRoutes() {
   ESP_LOGI(TAG, "Setting up captive portal routes...");
+
+  // Marked before the handlers are registered so that basicAuth() never demands
+  // Web UI credentials from requests that can only come from the setup portal.
+  m_captivePortalMode = true;
 
   struct RouteConfig {
     const char *uri;
@@ -580,38 +792,24 @@ esp_err_t WebServerManager::handleStaticFiles(httpd_req_t *req) {
   }
   const char *last_slash = strrchr(req->uri, '/');
   const char *filename = last_slash ? last_slash + 1 : req->uri;
-  std::string filepath = req->uri;
-  bool use_compressed = false;
+  std::string requested = req->uri;
   if (strlen(filename) == 0){
-    filename = "/index.html.gz";
-    use_compressed = true;
+    // A directory-style URI is the single-page app: serve its entry document.
+    filename = "index.html";
+    requested = "/index.html";
     httpd_resp_set_hdr(req, "Cache-Control", "no-cache");
   } else {
     httpd_resp_set_hdr(req, "Cache-Control", "public, max-age=31536000, immutable");
   }
 
-  // Check for gzip compressed version
-  if (str_ends_with(filename, ".js") || str_ends_with(filename, ".css")) {
-    size_t accept_len = httpd_req_get_hdr_value_len(req, "Accept-Encoding");
-    if (accept_len > 0 && accept_len < 256) {
-      char hdr[256];
-      if (httpd_req_get_hdr_value_str(req, "Accept-Encoding", hdr, sizeof(hdr)) == ESP_OK) {
-        if (strstr(hdr, "gzip") != nullptr) {
-          std::string compressed = filepath + ".gz";
-          if (LittleFS.exists(compressed.c_str())) {
-            use_compressed = true;
-            filepath = compressed;
-          }
-        }
-      }
-    }
-  }
-
-  if (!LittleFS.exists(filepath.c_str())) {
+  bool acceptBrotli = false, acceptGzip = false;
+  parseAcceptEncoding(req, acceptBrotli, acceptGzip);
+  const AssetVariant asset = resolveAsset(requested, acceptBrotli, acceptGzip);
+  if (asset.path.empty()) {
     httpd_resp_send_404(req);
     return ESP_FAIL;
   }
-  File file = LittleFS.open(filepath.c_str(), "r");
+  File file = LittleFS.open(asset.path.c_str(), "r");
   if (!file) {
     httpd_resp_send_404(req);
     return ESP_FAIL;
@@ -638,8 +836,8 @@ esp_err_t WebServerManager::handleStaticFiles(httpd_req_t *req) {
 
   httpd_resp_set_type(req, content_type);
   httpd_resp_set_hdr(req, "Connection", "keep-alive");
-  if (use_compressed)
-    httpd_resp_set_hdr(req, "Content-Encoding", "gzip");
+  if (asset.encoding != nullptr)
+    httpd_resp_set_hdr(req, "Content-Encoding", asset.encoding);
 
   char *buffer = (char*)malloc(4096); 
   if (!buffer) {
@@ -681,13 +879,26 @@ esp_err_t WebServerManager::handleRootOrHash(httpd_req_t *req) {
   if(!instance->basicAuth(req)){
     return sendAuthFailure(req);
   }
+  // A state-changing endpoint reached with the wrong method must not render the app.
+  if (isStateChangingEndpoint(req->uri)) {
+    httpd_resp_set_hdr(req, "Allow", "POST");
+    httpd_resp_send_err(req, HTTPD_405_METHOD_NOT_ALLOWED, "This endpoint only accepts POST");
+    return ESP_OK;
+  }
   std::string sessionCookie;
   if(instance->m_sessionId.compare(sessionId) != 0 || err != ESP_OK){
     sessionCookie = fmt::format("sessionId={};", instance->m_sessionId);
     httpd_resp_set_hdr(req, "Set-Cookie", sessionCookie.c_str());
   }
 
-  File file = LittleFS.open("/index.html.gz", "r");
+  bool acceptBrotli = false, acceptGzip = false;
+  parseAcceptEncoding(req, acceptBrotli, acceptGzip);
+  const AssetVariant entry = resolveAsset("/index.html", acceptBrotli, acceptGzip);
+  if (entry.path.empty()) {
+    httpd_resp_send_404(req);
+    return ESP_FAIL;
+  }
+  File file = LittleFS.open(entry.path.c_str(), "r");
   if (!file) {
     httpd_resp_send_404(req);
     return ESP_FAIL;
@@ -695,7 +906,8 @@ esp_err_t WebServerManager::handleRootOrHash(httpd_req_t *req) {
   httpd_resp_set_type(req, "text/html");
   httpd_resp_set_hdr(req, "Cache-Control", "no-cache");
   httpd_resp_set_hdr(req, "Connection", "keep-alive");
-  httpd_resp_set_hdr(req, "Content-Encoding", "gzip");
+  if (entry.encoding != nullptr)
+    httpd_resp_set_hdr(req, "Content-Encoding", entry.encoding);
 
   char buffer[1024];
   size_t bytes_read;
@@ -1349,6 +1561,10 @@ esp_err_t WebServerManager::handleStartConfigAP(httpd_req_t *req) {
 // ============================================================================
 
 esp_err_t WebServerManager::handleCaptivePortal(httpd_req_t *req) {
+  WebServerManager *instance = getInstance(req);
+  if (!instance || !instance->basicAuth(req)) {
+    return sendAuthFailure(req);
+  }
   httpd_resp_set_status(req, "302 Found");
   httpd_resp_set_hdr(req, "Location", "/captive-portal");
   httpd_resp_send(req, NULL, 0);
@@ -1361,11 +1577,19 @@ esp_err_t WebServerManager::handleGetCaptivePortalConfig(httpd_req_t *req) {
     httpd_resp_send_500(req);
     return ESP_FAIL;
   }
+  if (!instance->basicAuth(req)) {
+    return sendAuthFailure(req);
+  }
 
   const auto &miscConfig = instance->m_configManager.getConfig<espConfig::misc_config_t>();
 
   JsonBuilder config = JsonBuilder::object();
   config.addString("setupCode", miscConfig.setupCode.c_str());
+  // The portal lets the user set up Web UI authentication; the stored password is
+  // deliberately not part of this payload (it already exists on first boot and is
+  // reported once when the form is saved).
+  config.addBool("webAuthEnabled", miscConfig.webAuthEnabled);
+  config.addString("webUsername", miscConfig.webUsername.c_str());
   config.addNumber("hk_key_color", miscConfig.hk_key_color);
   config.addNumber("nfcPinsPreset", miscConfig.nfcPinsPreset);
   
@@ -1527,6 +1751,12 @@ void WebServerManager::captivePortalEthSaveTask(void *pvParameters) {
     res.withObject("data", [&](JsonBuilder &data) {
       data.addString("ip_addr", ipAddr.c_str());
     });
+    // The main Web UI needs these credentials, and this is the last screen the user
+    // sees before the device reboots, so repeat them in the message.
+    const auto &savedMisc = params->instance->m_configManager.getConfig<espConfig::misc_config_t>();
+    if (savedMisc.webAuthEnabled) {
+      message += fmt::format(" Web UI login: {} / {}", savedMisc.webUsername, savedMisc.webPassword);
+    }
     res.addString("message", message.c_str());
   }
 
@@ -1559,7 +1789,14 @@ void WebServerManager::captivePortalSaveTask(void *pvParameters) {
     httpd_resp_set_type(params->req, "application/json");
     JsonBuilder res = JsonBuilder::object();
     res.addBool("success", true);
-    res.addString("message", "Configuration saved successfully.");
+    std::string message = "Configuration saved successfully.";
+    // The main Web UI needs these credentials, and this is the last screen the user
+    // sees before the device reboots, so repeat them in the message.
+    const auto &savedMisc = params->instance->m_configManager.getConfig<espConfig::misc_config_t>();
+    if (savedMisc.webAuthEnabled) {
+      message += fmt::format(" Web UI login: {} / {}", savedMisc.webUsername, savedMisc.webPassword);
+    }
+    res.addString("message", message.c_str());
     res.withObject("data", [&](JsonBuilder &data) {
       data.addString("ip_addr", ipAddr.c_str());
     });
@@ -1593,6 +1830,9 @@ esp_err_t WebServerManager::handleSaveCaptivePortalConfig(httpd_req_t *req) {
   if (!instance) {
     httpd_resp_send_500(req);
     return ESP_FAIL;
+  }
+  if (!instance->basicAuth(req)) {
+    return sendAuthFailure(req);
   }
 
   const size_t max_content_size = 2048;
@@ -1651,6 +1891,30 @@ esp_err_t WebServerManager::handleSaveCaptivePortalConfig(httpd_req_t *req) {
 
   cJSON_DeleteItemFromObject(obj.get(), "wifiSsid");
   cJSON_DeleteItemFromObject(obj.get(), "wifiPassword");
+
+  // Web UI credentials are optional in the setup portal: first boot already
+  // generated a password, so an empty field means "keep what is stored" and the
+  // key is dropped before the body reaches ConfigManager.
+  for (const char *key : {"webUsername", "webPassword"}) {
+    cJSON *item = cJSON_GetObjectItem(obj.get(), key);
+    if (item && cJSON_IsString(item) && item->valuestring[0] == '\0') {
+      cJSON_DeleteItemFromObject(obj.get(), key);
+    }
+  }
+
+  // Turning authentication on without a usable password would leave the Web UI
+  // either open or protected by the shipped placeholder value.
+  cJSON *webAuthItem = cJSON_GetObjectItem(obj.get(), "webAuthEnabled");
+  if (webAuthItem && cJSON_IsBool(webAuthItem) && cJSON_IsTrue(webAuthItem)) {
+    cJSON *webPasswordItem = cJSON_GetObjectItem(obj.get(), "webPassword");
+    const auto &curMisc = instance->m_configManager.getConfig<espConfig::misc_config_t>();
+    const std::string effectivePassword =
+        (webPasswordItem && cJSON_IsString(webPasswordItem)) ? webPasswordItem->valuestring
+                                                            : curMisc.webPassword;
+    if (effectivePassword.empty() || effectivePassword == WEB_AUTH_PASSWORD) {
+      return sendJsonError(req, "Set a Web UI password to enable Web UI authentication");
+    }
+  }
 
   cJSON *ethEnabledItem = cJSON_GetObjectItem(obj.get(), "ethernetEnabled");
   bool ethernetEnabled = (ethEnabledItem && cJSON_IsBool(ethEnabledItem) && cJSON_IsTrue(ethEnabledItem));
@@ -1787,6 +2051,10 @@ BaseType_t task;
 }
 
 esp_err_t WebServerManager::handleWifiScan(httpd_req_t *req) {
+  WebServerManager *instance = getInstance(req);
+  if (!instance || !instance->basicAuth(req)) {
+    return sendAuthFailure(req);
+  }
   ESP_LOGI(TAG, "Starting WiFi scan...");
 
   wifi_mode_t current_mode;
