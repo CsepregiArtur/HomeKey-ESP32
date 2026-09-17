@@ -1,0 +1,30 @@
+[submodule "DigitalDoorKey"]
+	path = components/DigitalDoorKey
+	url = https://github.com/rednblkx/DigitalDoorKey.git
+	branch = main
+[submodule "HomeSpan"]
+	path = components/HomeSpan/upstream
+	url = https://github.com/HomeSpan/HomeSpan.git
+	branch = release-2.1.6
+[submodule "components/msgpack-c/upstream"]
+	path = components/msgpack-c/upstream
+	url = https://github.com/msgpack/msgpack-c.git
+	branch = c_master
+[submodule "components/loggable"]
+	path = components/loggable
+	url = https://github.com/rednblkx/loggable-thing.git
+[submodule "components/event_bus"]
+	path = components/event_bus
+	url = https://github.com/rednblkx/esp32-event-bus.git
+[submodule "components/loggable_espidf"]
+	path = components/loggable_espidf
+	url = https://github.com/rednblkx/loggable-espidf.git
+[submodule "components/pn532_cxx"]
+	path = components/pn532_cxx
+	url = https://github.com/rednblkx/pn532_cxx.git
+[submodule "components/pn532_hal"]
+	path = components/pn532_hal
+	url = https://github.com/rednblkx/esp-hal-pn532.git
+[submodule "components/pn7160"]
+	path = components/pn7160
+	url = https://github.com/rednblkx/pn7160.git

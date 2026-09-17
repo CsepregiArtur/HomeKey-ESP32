@@ -1,0 +1,17 @@
+.vscode/
+.idea/
+.zed/
+./logs/
+.cache/
+compile_commands.json
+src/config.h
+sdkconfig*
+build/
+managed_components/
+.pio/
+data/dist/
+.gemini/
+gha-creds-*.json
+docs/public
+.direnv/
+build-*/

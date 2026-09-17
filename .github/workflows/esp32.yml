@@ -1,0 +1,321 @@
+name: CI
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - dev
+    tags:
+      - 'v0.*'
+    paths-ignore:
+      - '.vscode/**'
+      - '.gitignore'
+      - 'LICENSE'
+      - '*.md'
+      - 'docs/**'
+      - '.github/**'
+
+concurrency:
+  group: "build"
+  cancel-in-progress: true
+
+jobs:
+  cleanup-dev-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    if: ${{ github.ref == 'refs/heads/main' }}
+    steps:
+      - name: Update dev tag
+        id: update-dev-tag
+        uses: actions/github-script@v9
+        with:
+          script: |
+            let previousSha = '';
+            try {
+              const { data: ref } = await github.rest.git.getRef({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                ref: 'tags/dev'
+              });
+              previousSha = ref.object.sha;
+            } catch (e) {
+              if (e.status !== 404 && (!e.response || e.response.status !== 404)) {
+                throw e;
+              }
+            }
+            core.setOutput('previous_sha', previousSha);
+            try {
+              await github.rest.git.updateRef({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                ref: 'tags/dev',
+                sha: context.sha,
+                force: true
+              });
+            } catch (e) {
+              if (e.status === 404 || (e.response && e.response.status === 404)) {
+                await github.rest.git.createRef({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  ref: 'refs/tags/dev',
+                  sha: context.sha
+                });
+              } else {
+                throw e;
+              }
+            }
+      - name: Replace dev release body
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const serverUrl = process.env.GITHUB_SERVER_URL || 'https://github.com';
+            const runUrl = `${serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+
+            try {
+              const { data: release } = await github.rest.repos.getReleaseByTag({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                tag: 'dev'
+              });
+
+              const previousSha = '${{ steps.update-dev-tag.outputs.previous_sha }}' || release.target_commitish || '';
+              let body = 'The CI pipeline is currently building the newest changes\n';
+              body += `Check the build status [here](${runUrl})\n`;
+              if (previousSha) {
+                const shortSha = previousSha.substring(0, 7);
+                const commitUrl = `${serverUrl}/${context.repo.owner}/${context.repo.repo}/commit/${previousSha}`;
+                body += `Attached are artifacts from the previous build ([${shortSha}](${commitUrl}))`;
+              } else {
+                body += 'Attached are artifacts from the previous build';
+              }
+
+              await github.rest.repos.updateRelease({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                release_id: release.id,
+                body: body
+              });
+              console.log(`Updated dev release body (ID: ${release.id})`);
+            } catch (e) {
+              if (e.status === 404 || (e.response && e.response.status === 404)) {
+                console.log('No existing dev release found, proceeding');
+              } else {
+                throw e;
+              }
+            }
+
+  littlefs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          sparse-checkout: 'data'
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - name: Cache Bun dependencies
+        uses: actions/cache@v5
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('data/bun.lockb', 'data/package.json') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-
+      - name: Install LittleFS Tool
+        run: pip install littlefs-python
+      - name: Install dependencies
+        run: bun install
+        working-directory: data
+      - name: Build
+        run: bun run build
+        working-directory: data
+      - name: Remove extra, only keep compressed
+        run: find dist -regex ".*\.\(html\|css\|br\|js\|json.gz\)" -delete
+        working-directory: data
+      - name: Create LittleFS Image
+        run: littlefs-python create $(pwd)/dist littlefs.bin -v --fs-size=0x20000 --name-max=64 --block-size=4096
+        working-directory: data
+      - name: Archive build directory
+        uses: actions/upload-artifact@v7
+        with:
+          name: ui-build-directory
+          path: data/dist
+          retention-days: 1
+      - name: Archive LittleFS image
+        uses: actions/upload-artifact@v7
+        with:
+          name: littlefs-binary
+          path: data/littlefs.bin
+
+  esp-idf-builds:
+    runs-on: ubuntu-latest
+    needs: littlefs
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [esp32, esp32c3, esp32c6, esp32s3]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+          submodules: 'recursive'
+      - name: Get UI Build Directory
+        uses: actions/download-artifact@v8
+        with:
+          name: ui-build-directory
+          path: data/dist
+      - uses: actions/cache@v5
+        with:
+          path: |
+            $HOME/.ccache
+            managed_components
+            build
+          key: ${{ runner.os }}-${{ matrix.target }}-build-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-${{ matrix.target }}-build-
+      - name: Fix directory permissions for Docker
+        run: |
+          mkdir -p build managed_components $HOME/.ccache
+          sudo chown -R 1000:1000 build managed_components $HOME/.ccache
+      - name: ESP-IDF Build (${{ matrix.target }})
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.5.5
+          target: ${{ matrix.target }}
+          path: '.'
+          extra_docker_args: >-
+            -v ${{ github.workspace }}/build:/project/build
+            -v ${{ github.workspace }}/managed_components:/project/managed_components
+            -v $HOME/.ccache:/root/.ccache
+            -e CCACHE_DIR=/root/.ccache
+          command: CI=true idf.py --ccache build && idf.py merge-bin
+      - name: Fix ownership post-build
+        run: sudo chown -R $USER:$USER build/ managed_components/ $HOME/.ccache
+      - name: Organize Binaries
+        run: |
+          mv build/HomeKey-ESP32.bin build/${{ matrix.target }}.firmware.bin
+          mv build/merged-binary.bin build/${{ matrix.target }}.firmware.factory.bin
+      - name: Archive firmware
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.target }}-firmware
+          path: build/${{ matrix.target }}.firmware.bin
+      - name: Archive merged binary
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.target }}-firmware-factory
+          path: build/${{ matrix.target }}.firmware.factory.bin
+
+  pre-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    if: ${{ github.ref == 'refs/heads/main' }}
+    needs: [littlefs, esp-idf-builds]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Get Artifacts
+        uses: actions/download-artifact@v8
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Delete existing dev release
+        uses: actions/github-script@v9
+        with:
+          script: |
+            try {
+              const { data: release } = await github.rest.repos.getReleaseByTag({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                tag: 'dev'
+              });
+
+              await github.rest.repos.deleteRelease({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                release_id: release.id
+              });
+              console.log(`Deleted existing dev release (ID: ${release.id})`);
+            } catch (e) {
+              if (e.status === 404 || (e.response && e.response.status === 404)) {
+                console.log('No existing dev release found, proceeding to create new one');
+              } else {
+                throw e;
+              }
+            }
+
+      - name: Create fresh dev release
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+            const { execSync } = require('child_process');
+
+            const serverUrl = process.env.GITHUB_SERVER_URL || 'https://github.com';
+            const repoOwner = context.repo.owner;
+            const repoName = context.repo.repo;
+
+            let latestTag = '';
+            try {
+              latestTag = execSync('git describe --tags --abbrev=0 --match "v*" HEAD^').toString().trim();
+            } catch (e) {
+              try {
+                latestTag = execSync('git describe --tags --abbrev=0 --match "v*"').toString().trim();
+              } catch (err) {
+                console.log('No previous version tag found');
+              }
+            }
+
+            let body = `**Full Changelog**: ${serverUrl}/${repoOwner}/${repoName}/compare/${latestTag || 'HEAD~1'}...dev`;
+
+            const { data: release } = await github.rest.repos.createRelease({
+              owner: repoOwner,
+              repo: repoName,
+              tag_name: 'dev',
+              name: 'development',
+              target_commitish: context.sha,
+              prerelease: true,
+              body: body
+            });
+
+            const artifactsDir = 'artifacts';
+            const files = [
+              'esp32.firmware.bin',
+              'esp32.firmware.factory.bin',
+              'esp32c3.firmware.bin',
+              'esp32c3.firmware.factory.bin',
+              'esp32c6.firmware.bin',
+              'esp32c6.firmware.factory.bin',
+              'esp32s3.firmware.bin',
+              'esp32s3.firmware.factory.bin',
+              'littlefs.bin'
+            ];
+
+            for (const file of files) {
+              const filePath = path.join(artifactsDir, file);
+              if (!fs.existsSync(filePath)) {
+                console.log(`Skipping missing file: ${file}`);
+                continue;
+              }
+              await github.rest.repos.uploadReleaseAsset({
+                owner: repoOwner,
+                repo: repoName,
+                release_id: release.id,
+                name: file,
+                data: fs.readFileSync(filePath)
+              });
+            }
