@@ -95,20 +95,37 @@ def _register_pio_generic_component():
 _register_pio_generic_component()
 
 
-# 4. Since ESP-IDF 5.5.4 the toolchain keeps compiler/linker flags in response
-#    files, so CMake's compile fragments look like @"<build>/toolchain/asmflags".
-#    PlatformIO 6.13 strips the surrounding quotes before parsing such a fragment
-#    with shlex, which leaves an unbalanced quote:
-#        ValueError: No closing quotation
-#    ESP-IDF has no switch to turn response files off, so make the parse lenient.
-#    Dropping the quotes yields "@<build>/toolchain/asmflags", which is still a
-#    valid GCC response-file reference.
+# 4. Since ESP-IDF 5.5.4 the toolchain keeps its global compiler flags in response
+#    files and CMake refers to them from the compile fragments as
+#    @"<build>/toolchain/cflags" / cxxflags / asmflags. PlatformIO 6.13 hands those
+#    fragments to SCons' flag parser, which silently drops the unknown "@file"
+#    token: components flagged this way (mqtt, freertos, ...) were then compiled
+#    without -mlongcalls and the link failed with 15k
+#    "dangerous relocation: call8: call target out of range" errors.
+#    ESP-IDF has no switch to turn response files off, so expand them here - the
+#    parser then sees the real flags (identical to what a plain ESP-IDF build uses)
+#    instead of a token it does not understand.
 def _relax_shlex_quoting():
+    import re
     import shlex
 
     original_split = shlex.split
 
+    # "@\"/path/to/cflags\"" (quotes may already be stripped by PlatformIO)
+    response_ref = re.compile(r'@(?P<quote>"?)(?P<path>/[^"\s]+)(?P=quote)')
+
+    def expand_response_files(value):
+        def _replace(match):
+            path = match.group("path")
+            if not os.path.isfile(path) or not path.endswith("flags"):
+                return match.group(0)
+            with open(path) as fp:
+                return " ".join(line.strip() for line in fp if line.strip())
+
+        return response_ref.sub(_replace, value)
+
     def split(s, comments=False, posix=True):
+        s = expand_response_files(s)
         try:
             return original_split(s, comments=comments, posix=posix)
         except ValueError:
