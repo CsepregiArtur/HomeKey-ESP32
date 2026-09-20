@@ -5,7 +5,15 @@
 .cache/
 compile_commands.json
 src/config.h
-sdkconfig*
+# ESP-IDF / PlatformIO generated configuration. The sdkconfig.defaults files are the
+# base configuration and MUST stay tracked: without them a fresh checkout (CI) builds
+# with ESP-IDF's own defaults and arduino-esp32 aborts during CMake with
+# "esp32-arduino requires CONFIG_FREERTOS_HZ=1000 (currently 100)".
+sdkconfig
+sdkconfig.old
+sdkconfig.*
+!sdkconfig.defaults
+!sdkconfig.defaults.*
 build/
 managed_components/
 .pio/
