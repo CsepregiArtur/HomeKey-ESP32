@@ -169,7 +169,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: [esp32, esp32c3, esp32c6, esp32s3]
+        # This fork enables flash encryption + Secure Boot V1 + NVS encryption
+        # with an esp32-specific partition layout, so CI targets the original
+        # ESP32 only. Other SoCs need Secure Boot V2 and their own layout.
+        target: [esp32]
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -182,6 +185,20 @@ jobs:
         with:
           name: ui-build-directory
           path: data/dist
+      - name: Prepare Secure Boot signing key
+        env:
+          SECURE_BOOT_SIGNING_KEY: ${{ secrets.SECURE_BOOT_SIGNING_KEY }}
+        run: |
+          # `scripts/ci_build.sh` generates an ephemeral key when this file is
+          # absent; write the real key here when the secret is configured so CI
+          # produces flashable images.
+          mkdir -p keys
+          if [ -n "${SECURE_BOOT_SIGNING_KEY}" ]; then
+            printf '%s' "${SECURE_BOOT_SIGNING_KEY}" | base64 -d > keys/secure_boot_signing_key.pem
+            echo "Secure Boot signing key installed from the SECURE_BOOT_SIGNING_KEY secret."
+          else
+            echo "::notice title=Ephemeral signing key::SECURE_BOOT_SIGNING_KEY is not set; CI will build with a throwaway key that only boots on a device with unburned eFuses."
+          fi
       - uses: actions/cache@v5
         with:
           path: |
@@ -204,9 +221,12 @@ jobs:
           extra_docker_args: >-
             -v ${{ github.workspace }}/build:/project/build
             -v ${{ github.workspace }}/managed_components:/project/managed_components
+            -v ${{ github.workspace }}/keys:/project/keys
             -v $HOME/.ccache:/root/.ccache
             -e CCACHE_DIR=/root/.ccache
-          command: CI=true idf.py --ccache build && idf.py merge-bin
+          # `scripts/ci_build.sh` creates the Secure Boot signing key when it is
+          # absent (ephemeral, CI-only) and then runs the normal build.
+          command: CI=true sh scripts/ci_build.sh
       - name: Fix ownership post-build
         run: sudo chown -R $USER:$USER build/ managed_components/ $HOME/.ccache
       - name: Organize Binaries
@@ -304,15 +324,11 @@ jobs:
             });
 
             const artifactsDir = 'artifacts';
+            // Only the original ESP32 is built by this fork (Secure Boot V1 +
+            // flash-encryption partition layout are esp32-specific).
             const files = [
               'esp32.firmware.bin',
               'esp32.firmware.factory.bin',
-              'esp32c3.firmware.bin',
-              'esp32c3.firmware.factory.bin',
-              'esp32c6.firmware.bin',
-              'esp32c6.firmware.factory.bin',
-              'esp32s3.firmware.bin',
-              'esp32s3.firmware.factory.bin',
               'littlefs.bin'
             ];
 

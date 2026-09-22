@@ -17,14 +17,10 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          # This fork builds the original ESP32 only (Secure Boot V1 + the
+          # flash-encryption partition layout are esp32-specific).
           gh run download --name "esp32-firmware" --repo ${{ github.repository }} && \
-          gh run download --name "esp32s3-firmware" --repo ${{ github.repository }} && \
-          gh run download --name "esp32c3-firmware" --repo ${{ github.repository }} && \
-          gh run download --name "esp32c6-firmware" --repo ${{ github.repository }} && \
           gh run download --name "esp32-firmware-factory" --repo ${{ github.repository }} && \
-          gh run download --name "esp32s3-firmware-factory" --repo ${{ github.repository }} && \
-          gh run download --name "esp32c3-firmware-factory" --repo ${{ github.repository }} && \
-          gh run download --name "esp32c6-firmware-factory" --repo ${{ github.repository }} && \
           gh run download --name "littlefs-binary" --repo ${{ github.repository }}
 
       - name: Upload to Release
@@ -32,11 +28,5 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release upload ${{ github.event.release.tag_name }} ./esp32.firmware.bin && \
-          gh release upload ${{ github.event.release.tag_name }} ./esp32s3.firmware.bin && \
-          gh release upload ${{ github.event.release.tag_name }} ./esp32c3.firmware.bin && \
-          gh release upload ${{ github.event.release.tag_name }} ./esp32c6.firmware.bin && \
           gh release upload ${{ github.event.release.tag_name }} ./esp32.firmware.factory.bin && \
-          gh release upload ${{ github.event.release.tag_name }} ./esp32s3.firmware.factory.bin && \
-          gh release upload ${{ github.event.release.tag_name }} ./esp32c3.firmware.factory.bin && \
-          gh release upload ${{ github.event.release.tag_name }} ./esp32c6.firmware.factory.bin && \
           gh release upload ${{ github.event.release.tag_name }} ./littlefs.bin
