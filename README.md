@@ -5,12 +5,35 @@
   [![Discord](https://badgen.net/discord/members/VWpZ5YyUcm?icon=discord)](https://discord.com/invite/VWpZ5YyUcm)
   [![CI](https://github.com/rednblkx/HomeKey-ESP32/actions/workflows/esp32.yml/badge.svg?branch=main)](https://github.com/rednblkx/HomeKey-ESP32/actions/workflows/esp32.yml)
   [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-  
+
   **Apple HomeKey functionality for the rest of us**
 
   [Documentation](https://rednblkx.github.io/HomeKey-ESP32/)
 
 </div>
+
+> [!IMPORTANT]
+> **This is a fork.** It is based on
+> [rednblkx/HomeKey-ESP32](https://github.com/rednblkx/HomeKey-ESP32) (upstream, MIT),
+> which remains the original project — all core HomeKey, NFC and HomeKit work is
+> theirs. Please send upstream bugs there and use this repository only for the
+> fork-specific additions below.
+>
+> **What this fork adds (0.10.0)**
+> - **Household / multi-node architecture** — several nodes (gate, main house,
+>   garage, …) share trust and recovery material, each with its own
+>   non-transferable device identity.
+> - **Encrypted, signed household backups** (XChaCha20-Poly1305 + Ed25519).
+> - **Authenticated MQTT control** — lock/unlock over HMAC-SHA256 commands with
+>   replay protection, plus a documented Home Assistant MQTT discovery surface.
+> - **Flash encryption, Secure Boot V1 and NVS encryption enabled**
+>   (see the security warning below — this is a breaking, irreversible change).
+> - New Web UI pages: household, node, health, security, audit, backup, recovery,
+>   provision.
+>
+> See [`docs/content/household.md`](docs/content/household.md),
+> [`docs/content/mqtt_household_api.md`](docs/content/mqtt_household_api.md) and
+> [`docs/content/mqtt_api_contract_matrix.md`](docs/content/mqtt_api_contract_matrix.md).
 
 ## What is HomeKey-ESP32?
 
@@ -18,14 +41,29 @@ The project aims to be the easy DIY solution for using Apple's HomeKey feature w
 
 **No proprietary hardware required** – just an ESP32 and one of the supported NFC modules
 
-> [!WARNING]
-> The flash memory is not encrypted as this kinda started as a pet project of mine but a lot of people started using
-> so unfortunately it's stuck like this because migration would be painful and i don't want to be telling people to
-> reconfigure their device if they want to update.
+> [!CAUTION]
+> **Flash encryption, Secure Boot V1 and NVS encryption are enabled in this fork.
+> This is irreversible and destroys existing device data.**
 >
-> If you care about this, i'm working on a new project implementing the new Aliro standard and flash will be
-> encrypted first thing, however, honestly don't know when that will be public, you can join the Discord server
-> if you want to know as soon as it is available.
+> These protections burn one-time eFuses and encrypt the flash on first boot:
+>
+> - **Already-deployed devices must be re-flashed over serial** and completely
+>   re-provisioned. The Wi-Fi credentials, HomeKit pairing and HomeKey reader
+>   enrolment stored on the device **are lost and cannot be recovered**.
+> - The partition layout changed (`nvs_keys` added, partition table moved to
+>   `0xD000`, app offsets realigned), so an OTA update from an older build is not
+>   possible — a serial flash is required.
+> - Every future firmware image must be signed with the Secure Boot key; you can
+>   no longer flash arbitrary unsigned binaries.
+> - USB re-flashing stays possible, but the device can only run signed images.
+>
+> If you are upgrading an existing installation, **back up your household
+> recovery secret and HomeKey configuration first**, and read
+> [`docs/content/security.md`](docs/content/security.md) before flashing.
+>
+> Upstream deliberately kept flash unencrypted to avoid forcing a migration on
+> existing users; this fork accepts that migration cost in exchange for
+> at-rest protection of the flash contents (including NVS).
 
 ## Getting Started
 

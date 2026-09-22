@@ -12,6 +12,22 @@ This document outlines different methods for updating the firmware on your HomeK
 >
 > However, if you're interested in what the new version brings, this guide is for you.
 
+## ⚠️ Breaking change in 0.10.0 — flash encryption and Secure Boot
+
+Version `0.10.0` (this fork) enables **flash encryption**, **Secure Boot V1** and **NVS encryption**, and changes the partition layout. This has consequences you must plan for:
+
+* **OTA is not possible from an older build.** The partition table moved (`0xD000`), an `nvs_keys` partition was added and the app partitions were realigned, so a network update will not boot. **A serial flash (`idf.py flash` / `esptool`) is required.**
+* **Existing device data is erased.** Wi-Fi credentials, HomeKit pairing and HomeKey reader enrolment stored on the device are lost when the flash is first encrypted; the device must be re-provisioned from scratch.
+* **Every future image must be signed.** Generate a Secure Boot signing key once and keep it safe - losing it means the device can no longer be updated:
+
+  ```bash
+  espsecure.py generate_signing_key --version 1 keys/secure_boot_signing_key.pem
+  ```
+
+* **Back up first.** Export the household recovery secret and note your configuration before upgrading.
+
+See [Security](security#flash-encryption-secure-boot-and-nvs-encryption) for the full details.
+
 **Required Files for Updates:**
 
 *   `*.firmware.bin`: The main application firmware file.

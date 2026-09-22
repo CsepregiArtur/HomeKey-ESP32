@@ -1,5 +1,16 @@
 # HomeKey-ESP32 → HomeKey Household — Architecture Report
 
+> [!IMPORTANT]
+> **This is a fork of [rednblkx/HomeKey-ESP32](https://github.com/rednblkx/HomeKey-ESP32).**
+> All upstream HomeKey/HomeKit/NFC work is the original author's; this fork adds the
+> Household multi-node architecture, authenticated MQTT control and encrypted
+> storage. See the [README](README.md) for the full list of additions.
+>
+> **Storage:** flash encryption, Secure Boot V1 and NVS encryption are enabled
+> (`sdkconfig.defaults`), so app, NVS and LittleFS contents are encrypted at rest
+> and only signed firmware boots. This is irreversible and requires a serial
+> re-flash of existing devices — see [Security](docs/content/security.md).
+
 This report is the inspection deliverable required before implementing the multi-node
 "HomeKey Household" architecture. It documents what exists today, what must be
 preserved, and how the new modules map onto the current codebase.
@@ -76,8 +87,7 @@ Apple Home app. This cannot be safely automated and is documented as a hard limi
 
 ### 1.8 Certificates & OTA
 - Certificates stored via `ConfigManager` (`saveCertificate`/`loadCertificate`/`getCertificatesStatus`),
-  validated with mbedTLS; used for HTTPS (server cert/key + optional CA for mTLS) and MQTT TLS.
-- OTA: `handleOTAUpload` (firmware + LittleFS), streaming task, progress broadcast.
+  validated with mbedTLS; used for HTTPS (server cert/key + optional CA for mTLS) and MQTT TLS.- OTA: `handleOTAUpload` (firmware + LittleFS), streaming task, progress broadcast.
   Optional image signature verification via `CONFIG_SECURE_SIGNED_APPS_NO_SECURE_BOOT`.
 
 ## 2. Target design (Household / Node)

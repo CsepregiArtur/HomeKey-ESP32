@@ -23,7 +23,8 @@ SecurityManager::Posture SecurityManager::compute() const {
 
     // Compile-time, hardware-bound protections.
 #ifdef CONFIG_SECURE_BOOT
-    addFinding(posture, "secure_boot", "OK", "Secure Boot V2 enabled.");
+    // The original ESP32 only supports Secure Boot V1 (ECDSA-P256).
+    addFinding(posture, "secure_boot", "OK", "Secure Boot V1 enabled.");
 #else
     addFinding(posture, "secure_boot", "WARNING", "Secure boot disabled.");
 #endif
@@ -32,6 +33,12 @@ SecurityManager::Posture SecurityManager::compute() const {
     addFinding(posture, "flash_encryption", "OK", "Flash encryption enabled.");
 #else
     addFinding(posture, "flash_encryption", "WARNING", "Flash encryption disabled.");
+#endif
+
+#ifdef CONFIG_NVS_ENCRYPTION
+    addFinding(posture, "nvs_encryption", "OK", "NVS encryption enabled.");
+#else
+    addFinding(posture, "nvs_encryption", "WARNING", "NVS encryption disabled.");
 #endif
 
 #ifdef CONFIG_SECURE_SIGNED_APPS_NO_SECURE_BOOT

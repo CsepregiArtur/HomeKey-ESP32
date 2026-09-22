@@ -5,8 +5,26 @@ Notable changes per release. User-facing detail lives in the docs:
 
 ## 0.10.0 - 2026-09-22
 
-Adds the **Household** multi-node architecture: several ESP32 nodes share trust and
-recovery material while each node keeps its own device-specific identity.
+Adds the **Household** multi-node architecture and enables **on-device flash
+encryption + Secure Boot V1 + NVS encryption**. Read the *Breaking* section before
+updating.
+
+### Security (breaking)
+
+* **Flash encryption, Secure Boot V1 and NVS encryption are now enabled**
+  (`CONFIG_SECURE_FLASH_ENC_ENABLED`, `CONFIG_SECURE_BOOT`, `CONFIG_NVS_ENCRYPTION`).
+  The app, NVS and LittleFS contents are encrypted at rest, and only firmware
+  signed with your Secure Boot key boots.
+* **The partition layout changed**: an `nvs_keys` partition was added, the
+  partition table moved from `0x8000` to `0xD000` (the signed bootloader no longer
+  fits in `0x7000`), and the app partitions were realigned to 64 KiB boundaries.
+* **OTA from an older build will not boot** — existing devices must be re-flashed
+  over serial and fully re-provisioned. Wi-Fi credentials, HomeKit pairing and
+  HomeKey reader enrolment are erased when the flash is first encrypted.
+* Generate the signing key once and keep it safe:
+  `espsecure.py generate_signing_key --version 1 keys/secure_boot_signing_key.pem`
+  (the original ESP32 only supports Secure Boot V1, which needs an ECDSA-P256 key).
+* `keys/` and `*.pem` are now gitignored so the private key cannot be committed.
 
 ### Household & multi-node
 

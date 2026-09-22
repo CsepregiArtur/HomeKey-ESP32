@@ -7,10 +7,17 @@ weight: 3
 
 Welcome to the control center of your HomeKey-ESP32! This guide will walk you through all the settings you can tweak to make your device work exactly how you want it to. All these configurations are easily managed through the device's intuitive web interface.
 
-> [!WARNING]
-> Flash memory on the device is currently **not encrypted**. This project started as a personal pet project and has grown significantly; however, implementing flash encryption now would require a painful migration process and force everyone to reconfigure their devices.
+> [!CAUTION]
+> **Flash memory, NVS and the firmware are encrypted and signature-verified in this fork.**
+> Flash encryption, Secure Boot V1 and NVS encryption are enabled by default, so the
+> configuration, Wi-Fi credentials and HomeKey material stored on the device are
+> ciphertext and only signed firmware boots.
 >
-> If you require full flash encryption, a new project implementing the **Aliro** standard is in development which will include encryption by default. Join the Discord server for updates on when that becomes available.
+> This is **irreversible**: the eFuses are one-time programmable. Upgrading an
+> existing device **erases its Wi-Fi credentials, HomeKit pairing and HomeKey
+> enrolment**, and because the partition layout changed an OTA update is not
+> possible - a serial flash and full re-provisioning are required. See
+> [Security](security#flash-encryption-secure-boot-and-nvs-encryption) before flashing.
 
 ## 1. Accessing the Web Interface
 

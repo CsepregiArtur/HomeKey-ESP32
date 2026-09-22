@@ -31,8 +31,7 @@ Requirements:
 | Platform | `espressif32@6.13.0` | last platform pairing ESP-IDF 5.5.x with GCC 14.2 |
 | Framework | local ESP-IDF v5.5.5 | via `platform_packages`, see below |
 | Toolchain | local `xtensa-esp-elf` (`esp-14.2.0_20260121`) | the compiler ESP-IDF 5.5.5 expects, also via `platform_packages` |
-| Partition table | `with_ota.csv` | `board_build.partitions`, must match `sdkconfig.defaults` |
-| sdkconfig | `sdkconfig.defaults`, `sdkconfig.defaults.esp32` | read by ESP-IDF itself |
+| Partition table | `with_ota.csv` | `board_build.partitions`, must match `sdkconfig.defaults` || sdkconfig | `sdkconfig.defaults`, `sdkconfig.defaults.esp32` | read by ESP-IDF itself |
 
 ### Why a local ESP-IDF
 

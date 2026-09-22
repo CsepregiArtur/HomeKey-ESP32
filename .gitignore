@@ -23,3 +23,6 @@ gha-creds-*.json
 docs/public
 .direnv/
 build-*/
+# Secure Boot signing keys — NEVER commit private keys.
+keys/
+*.pem

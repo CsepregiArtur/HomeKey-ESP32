@@ -11,6 +11,12 @@ This wiki is **versioned** — the version selector in the top bar lets you swit
 You are currently viewing the documentation for the **bleeding edge** (`main` branch), which may describe features and behavior that are not yet available in the latest release. If you are running a released firmware version, pick that version from the selector to see the docs matching your installation.
 {{< /callout >}}
 
+{{< callout type="important" >}}
+**This is a fork of [rednblkx/HomeKey-ESP32](https://github.com/rednblkx/HomeKey-ESP32)** (MIT). The upstream project is the original work and remains the reference for core HomeKey/HomeKit/NFC behaviour. This fork adds the **Household multi-node** architecture, authenticated MQTT control with Home Assistant discovery, encrypted signed backups, and **on-device flash encryption / Secure Boot V1 / NVS encryption**.
+
+> Enabling flash encryption is **irreversible** and requires a serial re-flash plus full re-provisioning of existing devices. Read [Security](security) and [Updates](updates) before upgrading.
+{{< /callout >}}
+
 Welcome to the HomeKey-ESP32 documentation! This is your one-stop shop for everything you need to know about setting up, configuring, and using your HomeKey-ESP32 device. Whether you're a seasoned ESP32 developer or just starting your smart home journey, we've got you covered.
 
 Use the navigation on the left (or use the top-right menu if you're on a mobile device) to explore the different sections.

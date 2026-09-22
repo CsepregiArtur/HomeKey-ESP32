@@ -9,7 +9,7 @@ HomeKey-ESP32 controls a door lock, so it is worth being explicit about what it 
 
 | Attacker has... | Can they get in? | Notes |
 | --- | --- | --- |
-| Physical access to the device (USB/serial) | **Yes** | The flash is readable and writable over the serial bootloader, so the HomeKey reader keys, the HAP pairing keys and the Wi-Fi credentials can be extracted, and arbitrary firmware can be flashed. See [Physical access](#physical-access-is-a-total-compromise). |
+| Physical access to the device (USB/serial) | **Reading secrets: no. Reflashing: no.** | Flash encryption and Secure Boot V1 are enabled, so the stored reader keys, HAP pairing keys, Wi-Fi credentials and NVS contents are ciphertext, and only signed firmware boots. Physical access is still a **denial-of-service** risk. See [Physical access](#physical-access). |
 | A device on the same network (LAN/Wi-Fi/guest VLAN) | **Depends on your settings** | With Web UI authentication enabled, reading/writing the configuration requires the Web UI password. Without it, everything below is open. |
 | Access to your MQTT broker | **Potentially, yes** | Anyone who can publish to the lock's command topics can unlock the door unless the broker enforces authentication and per-device ACLs. See [MQTT](#mqtt-is-an-unlock-path-treat-it-like-one). |
 | A browser on the same network (malicious web page) | **No** | Requests are rejected unless the `Host` header names the device (DNS rebinding / CSRF protection), and all state-changing endpoints are POST-only. |
@@ -80,43 +80,65 @@ The lock subscribes to command topics such as `homekit/set_target_state` and `ho
 
 Put the lock on an IoT SSID or VLAN that cannot reach your computers, and block client-to-client traffic if your AP supports it. The device speaks plain HTTP on the local network by default, so a segmented network is what keeps that acceptable.
 
-### Verify OTA images (optional, recommended for releases)
+### Verify OTA images
 
-ESP-IDF can require a signature on every OTA image *without* secure boot, which needs no eFuses and no re-provisioning. It protects against a spoofed or tampered firmware upload reaching the device over the network. Signed builds need a key, so it is not enabled in the default `sdkconfig.defaults` - add the following to your `sdkconfig.defaults` (see the commented block at the end of that file):
+OTA image signature verification is **enabled by default** in this fork, as part of Secure Boot V1 (see below). Every image the device accepts - whether flashed or uploaded over the network - must be signed with the Secure Boot signing key.
 
 ```ini
-CONFIG_SECURE_SIGNED_APPS_NO_SECURE_BOOT=y
-CONFIG_SECURE_SIGNED_APPS_RSA_SCHEME=y
+CONFIG_SECURE_BOOT=y
+CONFIG_SECURE_BOOT_V1_ENABLED=y
+CONFIG_SECURE_BOOT_SIGNING_KEY="keys/secure_boot_signing_key.pem"
 CONFIG_SECURE_SIGNED_ON_UPDATE_NO_SECURE_BOOT=y
-CONFIG_SECURE_BOOT_SIGNING_KEY="/absolute/path/to/my_signing_key.pem"
 ```
 
-Generate the key once and never lose it - the same key has to sign every future update:
+Generate the key **once** and never lose it - the same key has to sign every future update, and losing it means the device can no longer be updated:
 
 ```bash
-espsecure.py generate_signing_key --version 2 my_signing_key.pem
+# Secure Boot V1 on the original ESP32 uses an ECDSA-P256 key (not RSA).
+espsecure.py generate_signing_key --version 1 keys/secure_boot_signing_key.pem
 ```
 
-Keep `CONFIG_SECURE_SIGNED_ON_BOOT_NO_SECURE_BOOT` disabled (the default). Verifying on update is where the value is; verifying on boot without hardware secure boot mostly adds a way to brick a device that was just flashed over USB.
+`keys/` and `*.pem` are gitignored; **never commit the private key.**
 
-Note the second-order effect: once the feature is on, *every* OTA image the device accepts must be signed, including community builds. If you publish unsigned binaries, do not enable this.
+## Flash encryption, Secure Boot and NVS encryption
 
-## Physical access is a total compromise
+This fork enables all three, unlike upstream:
 
-This firmware does **not** enable flash encryption or secure boot, and that is a deliberate project decision:
+| Protection | Setting | Effect |
+| --- | --- | --- |
+| Flash encryption | `CONFIG_SECURE_FLASH_ENC_ENABLED` | The whole flash (app, NVS, LittleFS) is AES-encrypted with a per-device key in eFuse BLK1, unreadable from software. |
+| Encrypted NVS | `CONFIG_NVS_ENCRYPTION` + `CONFIG_SECURE_FLASH_ENC_USE_ENCRYPTED_NVS` | NVS keys live in the dedicated `nvs_keys` partition. Wi-Fi credentials, HomeKey reader material and all configuration are ciphertext. |
+| Secure Boot V1 | `CONFIG_SECURE_BOOT` + `CONFIG_SECURE_BOOT_V1_ENABLED` | The bootloader and app must be signed with the RSA/ECDSA key whose digest is burned into eFuse BLK2. Only signed firmware boots. |
 
-* Both are one-way eFuse burns that require erasing the whole flash first. Every deployed device would lose its Wi-Fi credentials, its HomeKit pairing and its enrolled keys, i.e. every user would have to reconfigure from scratch.
-* An encrypted device also cannot be reflashed over USB without the key, which does not fit a project where users build and flash their own hardware.
-* NVS encryption would additionally need an `nvs_keys` partition; the partition table has no spare space.
+The original ESP32 only supports **Secure Boot V1**, which requires an **ECDSA-P256** key; RSA-based Secure Boot V2 is not available on this chip.
 
-So assume that anyone who can hold the device for a minute can read its secrets and replace its firmware. Practical consequences:
+> [!CAUTION]
+> **This is irreversible and destroys existing device data.**
+>
+> - The eFuses are **one-time programmable**. There is no way back.
+> - On first boot after flashing, the ESP32 encrypts the flash **in place**. Any
+>   Wi-Fi credentials, HomeKit pairing and HomeKey reader enrolment already on the
+>   device **are lost and cannot be recovered** - the device must be fully
+>   re-provisioned.
+> - The partition layout changed (`nvs_keys` added, partition table moved to
+>   `0xD000`, app partitions realigned to 64 KiB), so **an OTA update from an older
+>   build is not possible**. A serial flash is mandatory.
+> - After the eFuses are burned, the device only accepts firmware signed with your
+>   signing key. If you lose that key you can no longer update the device.
+>
+> Back up your household recovery secret and configuration before flashing.
 
-* Do not reuse the device's Wi-Fi password anywhere else.
-* Rotate the MQTT password if a device is sold, given away or returned.
+## Physical access
+
+Flash encryption and Secure Boot protect the **secrets at rest** and the firmware integrity, but they do not make the device tamper-proof:
+
+* An attacker with the device can still cause a **denial of service** (destroy it, glitch it, or trigger repeated reboots).
+* Physical access plus a fault-injection/glitching lab is a much higher bar than serial reading, but is not something this project claims to defeat.
+* Do not reuse the device's Wi-Fi password anywhere else, and rotate the MQTT password if a device is sold, given away or returned.
 * Unpair the accessory in the Home app before handing the device on (this also erases the HomeKey reader data), or erase NVS.
-* Physically secure the device so that its USB port is not reachable without opening the enclosure.
 
-If you are building hardware for others, the alternative is a factory image with flash encryption and Secure Boot v2 enabled from the first boot - new devices only, keeping the current scheme for existing ones.
+Because the flash is now encrypted, an attacker can no longer simply read the reader keys or the HAP pairing keys over serial, and cannot flash a modified firmware image.
+
 
 ## Recovering from a lost credential
 

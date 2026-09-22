@@ -1,6 +1,18 @@
 # Name, Type, SubType, Offset, Size, Flags
-nvs,data,nvs,,0x10000,,
-otadata,data,ota,,0x2000,,
-app0,app,ota_0,,0x1E0000,,
-app1,app,ota_1,,0x1E0000,,
-spiffs,data,spiffs,,0x20000,,
+#
+# Layout note: with Secure Boot the partition table lives at 0xD000
+# (CONFIG_PARTITION_TABLE_OFFSET), so the first partition starts at 0xE000.
+# App partitions must be 64 KiB aligned, hence app0 at 0x20000.
+#
+# Flash-encryption layout: `nvs_keys` holds the NVS encryption keys and MUST be
+# present (and marked `encrypted`) when CONFIG_SECURE_FLASH_ENC_ENABLED and
+# CONFIG_NVS_ENCRYPTION are both enabled, otherwise the device fails to boot.
+#
+# WARNING: devices already flashed with the previous layout MUST be re-flashed
+# over serial (see README / docs/content/security.md).
+nvs,data,nvs,0xE000,0x6000,,
+nvs_keys,data,nvs_keys,0x14000,0x1000,encrypted
+otadata,data,ota,0x15000,0x2000,,
+app0,app,ota_0,0x20000,0x1E0000,,
+app1,app,ota_1,0x200000,0x1E0000,,
+spiffs,data,spiffs,0x3E0000,0x20000,,

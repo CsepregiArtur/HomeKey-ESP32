@@ -1,5 +1,12 @@
 # HomeKey-ESP32 — Comprehensive Project Description
 
+> [!IMPORTANT]
+> **This is a fork of [rednblkx/HomeKey-ESP32](https://github.com/rednblkx/HomeKey-ESP32)**
+> (MIT). Upstream is the original project and remains the reference for the core
+> HomeKey / HomeKit / NFC functionality. This fork adds the **Household multi-node**
+> architecture, authenticated MQTT control, encrypted backups and on-device flash
+> encryption; see the [README](README.md).
+
 ## 1. What it is
 
 **HomeKey-ESP32** is an open-source DIY firmware (MIT-licensed) that brings **Apple HomeKey** — the NFC-based "tap your iPhone/Apple Watch to unlock" feature — to ordinary ESP32 hardware. Instead of buying a HomeKey-certified smart lock, you wire an NFC reader to an ESP32, flash this firmware, and the device becomes a HomeKey reader plus a full smart-home lock accessory.
@@ -25,7 +32,7 @@ The tagline: *"Apple HomeKey functionality for the rest of us"* — no proprieta
 | **OTA** | Firmware and LittleFS (web UI) updates over the network |
 | **Hardware actions** | Relays/GPIO, NeoPixels, feedback LEDs, alternate action button |
 | **Ethernet** | Wired networking as an alternative to Wi-Fi |
-| **Security** | Per-device generated credentials, Web UI auth, HTTPS/mTLS, OTA verification |
+| **Security** | Per-device generated credentials, Web UI auth, HTTPS/mTLS, OTA verification, **flash encryption + Secure Boot V1 + NVS encryption**, HMAC-authenticated MQTT commands, encrypted signed backups |
 
 ---
 
