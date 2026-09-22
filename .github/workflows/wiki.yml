@@ -47,6 +47,30 @@ jobs:
       - name: Setup Pages
         id: pages
         uses: actions/configure-pages@v6
+        with:
+          # Create the Pages site if the repository does not have one yet.
+          # Without this the action fails with "Get Pages site failed" /
+          # 404 Not Found on a repo where Pages was never enabled.
+          # Requires the `pages: write` permission (granted above).
+          enablement: true
+      - name: Resolve Pages base URL
+        id: base_url
+        env:
+          PAGES_BASE_URL: ${{ steps.pages.outputs.base_url }}
+          OWNER: ${{ github.repository_owner }}
+          REPO: ${{ github.event.repository.name }}
+        run: |
+          # configure-pages can return an empty base_url right after it creates
+          # the site. Fall back to the default project-pages URL so the build
+          # never emits links containing a literal empty string.
+          base_url="${PAGES_BASE_URL%/}"
+          if [ -z "${base_url}" ]; then
+            owner="$(echo "${OWNER}" | tr '[:upper:]' '[:lower:]')"
+            repo="$(echo "${REPO}" | tr '[:upper:]' '[:lower:]')"
+            base_url="https://${owner}.github.io/${repo}"
+            echo "Warning: configure-pages returned no base_url; using ${base_url}"
+          fi
+          echo "base_url=${base_url}" >> "$GITHUB_OUTPUT"
       - name: Setup Hugo
         run: |
           wget -O ${{ runner.temp }}/hugo.deb https://github.com/gohugoio/hugo/releases/download/v${HUGO_VERSION}/hugo_extended_${HUGO_VERSION}_linux-amd64.deb \
@@ -75,13 +99,13 @@ jobs:
           hugo \
             --gc -s docs --minify \
             --destination "${{ runner.temp }}/site" \
-            --baseURL "${{ steps.pages.outputs.base_url }}/"
+            --baseURL "${{ steps.base_url.outputs.base_url }}/"
 
       - name: Build tagged versions
         env:
           HUGO_ENVIRONMENT: production
           HUGO_ENV: production
-          BASE_URL: ${{ steps.pages.outputs.base_url }}
+          BASE_URL: ${{ steps.base_url.outputs.base_url }}
           DOCS_TAGS: ${{ steps.tags.outputs.docs_tags }}
           LATEST_TAG: ${{ steps.tags.outputs.latest }}
         run: |
