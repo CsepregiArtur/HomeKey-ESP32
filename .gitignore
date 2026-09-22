@@ -26,3 +26,8 @@ build-*/
 # Secure Boot signing keys — NEVER commit private keys.
 keys/
 *.pem
+
+# Release artifacts downloaded by `gh run download` (do not commit binaries).
+*.firmware.bin
+*.firmware.factory.bin
+littlefs.bin
