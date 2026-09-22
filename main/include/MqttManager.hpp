@@ -2,11 +2,16 @@
 #include "app_event_loop.hpp"
 #include "eventStructs.hpp"
 #include "mqtt_client.h"
+#include <deque>
 #include <string>
 #include <vector>
 
 class LockManager;
 class ConfigManager;
+class HouseholdManager;
+class NodeIdentityManager;
+class HealthManager;
+class AuditManager;
 namespace espConfig { struct mqttConfig_t; struct mqtt_ssl_t;}
 
 /**
@@ -63,6 +68,19 @@ public:
      */
     void end();
 
+    // --- Household / node wiring (optional; enables the structured namespace) ---
+    void setHouseholdManager(HouseholdManager *household) { m_household = household; }
+    void setNodeIdentityManager(NodeIdentityManager *node) { m_node = node; }
+    void setHealthManager(HealthManager *health) { m_health = health; }
+    void setAuditManager(AuditManager *audit) { m_audit = audit; }
+
+    /// Publish node state + health to homekey/household/<hid>/nodes/<nid>/...
+    void publishNodeStatus();
+    void publishBackupStatus(const std::string &status);
+
+    /// Publish safe last-authentication metadata (type/result/timestamp only).
+    void publishLastAuth(const std::string &authType, const std::string &result);
+
 private:
     /**
       * @brief Publishes the current state of the lock.
@@ -99,6 +117,13 @@ private:
     void publishHassDiscovery();
     void publishMqttStatus(bool connected, MqttErrorCode errorCode, const std::string& errorMessage = "");
 
+    // --- Household / node namespace & authenticated commands ---
+    std::string baseTopic() const;
+    bool handleSecureCommand(const std::string &topic, const std::string &data);
+    static std::string makeCommandMac(uint64_t ts, const std::string &nonce,
+                                      const std::string &reqId, const std::string &action,
+                                      const std::vector<uint8_t> &key);
+
     // --- SSL/TLS Configuration ---
     bool configureSSL(esp_mqtt_client_config_t& mqtt_cfg);
     void logSSLError(const char* operation, esp_err_t error);
@@ -122,5 +147,12 @@ private:
     // Status tracking (replaces event-based status publishing)
     MqttErrorCode m_lastErrorCode = MqttErrorCode::NONE;
     std::string m_lastErrorMessage;
+
+    // Household / node context (optional).
+    HouseholdManager *m_household = nullptr;
+    NodeIdentityManager *m_node = nullptr;
+    HealthManager *m_health = nullptr;
+    AuditManager *m_audit = nullptr;
+    std::deque<std::string> m_seenNonces;  ///< bounded replay protection
 };
 

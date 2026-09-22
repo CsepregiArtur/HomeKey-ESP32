@@ -3,6 +3,39 @@
 Notable changes per release. User-facing detail lives in the docs:
 [Security](docs/content/security.md) and [Updates / breaking changes](docs/content/updates.md).
 
+## 0.10.0 - 2026-09-22
+
+Adds the **Household** multi-node architecture: several ESP32 nodes share trust and
+recovery material while each node keeps its own device-specific identity.
+
+### Household & multi-node
+
+* **Household / node model** — a device can be enrolled into a household and act as a
+  node (`gate`, `main`, …) with its own Ed25519 node identity that is never cloned to
+  another device.
+* **Encrypted, signed backups** — household and node configuration are exported as a
+  versioned, XChaCha20-Poly1305-encrypted and Ed25519-signed blob; no raw NVS dumps.
+  Device-specific cryptographic identity (HomeKey reader private key, endpoint
+  persistent keys) is excluded from backups.
+* **Provisioning** — single-use, expiring, replay-protected join codes (stored only as a
+  SHA-256 hash).
+* **Recovery** — a one-time-export household recovery secret decrypts backups so a
+  replacement node can be enrolled without Home Assistant.
+* **MQTT household namespace** — structured telemetry under
+  `homekey/household/<household_id>/nodes/<node_id>/…`; lock/unlock commands are
+  HMAC-authenticated and replay-protected, and `unlock=true` is never accepted as
+  authorization.
+* **Home Assistant MQTT discovery** — node online/health entities with stable ids
+  (`<household_id>_<node_id>_<entity>`).
+* **New Web UI pages** — `/household`, `/node`, `/health`, `/security`, `/audit`,
+  `/backup`, `/recovery`, `/provision`.
+
+### Breaking
+
+* Replacing a node's physical HomeKey reader issues a new reader identity, so existing
+  HomeKey credentials must be re-provisioned in the Apple Home app — this cannot be
+  automated.
+
 ## 0.9.0 - 2026-09-17
 
 Security-focused release: it changes some defaults, so read the *Breaking* section below

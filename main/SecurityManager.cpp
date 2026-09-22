@@ -1,0 +1,86 @@
+#include "SecurityManager.hpp"
+#include "ConfigManager.hpp"
+#include "config.hpp"
+#include "defaults.h"
+#include <fmt/format.h>
+#include <sdkconfig.h>
+
+namespace {
+void addFinding(SecurityManager::Posture &p, const std::string &component,
+                const std::string &status, const std::string &detail) {
+    p.findings.push_back({component, status, detail});
+    if (status == "WARNING" || status == "DISABLED") {
+        p.all_ok = false;
+    }
+}
+} // namespace
+
+SecurityManager::SecurityManager(const ConfigManager &config) : m_config(config) {}
+
+SecurityManager::Posture SecurityManager::compute() const {
+    Posture posture;
+    posture.all_ok = true;
+
+    // Compile-time, hardware-bound protections.
+#ifdef CONFIG_SECURE_BOOT
+    addFinding(posture, "secure_boot", "OK", "Secure Boot V2 enabled.");
+#else
+    addFinding(posture, "secure_boot", "WARNING", "Secure boot disabled.");
+#endif
+
+#ifdef CONFIG_SECURE_FLASH_ENC_ENABLED
+    addFinding(posture, "flash_encryption", "OK", "Flash encryption enabled.");
+#else
+    addFinding(posture, "flash_encryption", "WARNING", "Flash encryption disabled.");
+#endif
+
+#ifdef CONFIG_SECURE_SIGNED_APPS_NO_SECURE_BOOT
+    addFinding(posture, "ota_signature", "OK", "OTA image signature verification enabled.");
+#else
+    addFinding(posture, "ota_signature", "WARNING", "OTA signature verification disabled.");
+#endif
+
+    const auto &misc = m_config.getConfig<espConfig::misc_config_t>();
+    const auto &mqtt = m_config.getConfig<espConfig::mqttConfig_t>();
+
+    if (mqtt.useSSL) {
+        addFinding(posture, "mqtt_tls", "OK", "MQTT TLS enabled.");
+    } else {
+        addFinding(posture, "mqtt_tls", "WARNING",
+                   "MQTT TLS disabled; MQTT command topics can unlock the door.");
+    }
+
+    if (misc.webHttpsEnabled) {
+        addFinding(posture, "https", "OK", "HTTPS web interface enabled.");
+    } else {
+        addFinding(posture, "https", "WARNING", "HTTPS disabled; web traffic is plain HTTP.");
+    }
+
+    if (misc.webAuthEnabled) {
+        addFinding(posture, "web_auth", "OK", "Web UI authentication enabled.");
+    } else {
+        addFinding(posture, "web_auth", "WARNING",
+                   "Web UI authentication disabled; anyone on the network can reconfigure the device.");
+    }
+
+    if (misc.otaPasswd.empty() || misc.otaPasswd == OTA_PWD) {
+        addFinding(posture, "homespan_ota", "DISABLED",
+                   "HomeSpan OTA disabled while the OTA password is unset/stock.");
+    } else {
+        addFinding(posture, "homespan_ota", "OK", "HomeSpan OTA password set.");
+    }
+
+    return posture;
+}
+
+std::string SecurityManager::toJson(const Posture &posture) const {
+    std::string findings;
+    for (size_t i = 0; i < posture.findings.size(); ++i) {
+        const auto &f = posture.findings[i];
+        findings += fmt::format(
+            "{{\"component\":\"{}\",\"status\":\"{}\",\"detail\":\"{}\"}}{}",
+            f.component, f.status, f.detail, i + 1 < posture.findings.size() ? "," : "");
+    }
+    return fmt::format("{{\"all_ok\":{},\"findings\":[{}]}}", posture.all_ok ? "true" : "false",
+                       findings);
+}

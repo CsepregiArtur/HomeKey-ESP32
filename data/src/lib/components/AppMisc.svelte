@@ -18,11 +18,11 @@
 	import PairingQR from "$lib/components/PairingQR.svelte";
 
 	interface Props {
-		misc: MiscConfig;
-		eth: EthConfig;
-		nfcPresets: NfcGpioPinsPreset;
-		nfcConnected?: boolean;
-		error?: string | null;
+                misc: MiscConfig | null | undefined;
+                eth: EthConfig | null | undefined;
+                nfcPresets: NfcGpioPinsPreset | null | undefined;
+                nfcConnected?: boolean;
+                error?: string | null;
 	}
 
 	let { 
@@ -36,12 +36,11 @@
 	let activeTab = $state<'homekit' | 'hardware' | 'network' | 'security'>('homekit');
 
 	// svelte-ignore state_referenced_locally
-	let miscConfig = $state<MiscConfig>($state.snapshot(misc));
-	// svelte-ignore state_referenced_locally
-	let ethConfig = $state<EthConfig>($state.snapshot(eth));
-	// svelte-ignore state_referenced_locally
-	let nfcPresetsList = $state<NfcGpioPinsPreset>($state.snapshot(nfcPresets));
-
+        let miscConfig = $state<MiscConfig>($state.snapshot(misc ?? ({} as MiscConfig)));
+        // svelte-ignore state_referenced_locally
+        let ethConfig = $state<EthConfig>($state.snapshot(eth ?? ({} as EthConfig)));
+        // svelte-ignore state_referenced_locally
+        let nfcPresetsList = $state<NfcGpioPinsPreset>($state.snapshot(nfcPresets ?? ({} as NfcGpioPinsPreset)));
 	const colorOptions = [
 		{ value: 0, label: 'Tan', class: 'bg-[#ddd5cc] text-[#3E2723]' },
 		{ value: 1, label: 'Gold', class: 'bg-[#e6d1a8] text-[#3E2723]' },

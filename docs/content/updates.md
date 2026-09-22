@@ -29,11 +29,11 @@ How to read the value:
 
 | Value | Meaning |
 | --- | --- |
-| `v0.9.0` | A tagged release. |
-| `0.9.0-dev+1a2b3c4` | Built from a branch, `0.9.0` being the version it is based on and `1a2b3c4` the exact commit. |
-| `0.9.0-dev+1a2b3c4-dirty` | Same, but the worktree had uncommitted changes - not a release. |
+| `v0.10.0` | A tagged release. |
+| `0.10.0-dev+1a2b3c4` | Built from a branch, `0.10.0` being the version it is based on and `1a2b3c4` the exact commit. |
+| `0.10.0-dev+1a2b3c4-dirty` | Same, but the worktree had uncommitted changes - not a release. |
 
-The UI version is reported separately as `<app version>+<commit>` (for example `0.9.0+1a2b3c4`), because the web interface can be updated on its own.
+The UI version is reported separately as `<app version>+<commit>` (for example `0.10.0+1a2b3c4`), because the web interface can be updated on its own.
 
 ## 1. Over-The-Air (OTA) Updates
 

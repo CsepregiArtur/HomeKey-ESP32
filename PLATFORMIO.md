@@ -103,9 +103,9 @@ What a build reports:
 
 | Build | Version string |
 | --- | --- |
-| From a release tag (`v0.9.0`) | `v0.9.0` (via `git describe --tags`) |
-| From a branch with no reachable tag | `0.9.0-dev+<commit>` |
-| ... and with uncommitted changes | `0.9.0-dev+<commit>-dirty` |
+| From a release tag (`v0.10.0`) | `v0.10.0` (via `git describe --tags`) |
+| From a branch with no reachable tag | `0.10.0-dev+<commit>` |
+| ... and with uncommitted changes | `0.10.0-dev+<commit>-dirty` |
 
 The value is visible in the Web UI (OTA page and device info panel) and in HomeKit as the
 firmware revision. Tag releases as `vX.Y.Z`: `wiki.yml` publishes every `v*` tag that

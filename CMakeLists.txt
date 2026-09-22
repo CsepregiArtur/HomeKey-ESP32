@@ -4,7 +4,7 @@ include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 # Application version. Bump this when cutting a release: it is what an untagged
 # build reports, and what a tagged build is expected to match (a build from an
 # existing tag reports the tag itself, via git describe below).
-set(HK_APP_VERSION "0.9.0")
+set(HK_APP_VERSION "0.10.0")
 
 execute_process(
     COMMAND git rev-parse --short HEAD

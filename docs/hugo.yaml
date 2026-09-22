@@ -33,10 +33,12 @@ menu:
 
 params:
   version:
-    latest: "v0.9.0"
+    latest: "v0.10.0"
   versions:
     - name: main
       url: /
+    - name: v0.10.0
+      url: https://rednblkx.github.io/HomeKey-ESP32/v0.10.0/
     - name: v0.9.0
       url: https://rednblkx.github.io/HomeKey-ESP32/v0.9.0/
     - name: v0.8

@@ -17,6 +17,14 @@ class NvsCredentialStore;
 class SystemManager;
 class MqttManager;
 class NfcManager;
+class HouseholdManager;
+class NodeIdentityManager;
+class SecurityManager;
+class HealthManager;
+class AuditManager;
+class ProvisioningManager;
+class BackupManager;
+class RestoreManager;
 namespace loggable {
 class WebSocketLogSinker;
 }
@@ -69,6 +77,14 @@ public:
   bool basicAuth(httpd_req_t* req);
   void setMqttManager(MqttManager *mqttManager) { m_mqttManager = mqttManager; }
   void setNfcManager(NfcManager *nfcManager) { m_nfcManager = nfcManager; }
+  void setHouseholdManager(HouseholdManager *h) { m_householdManager = h; }
+  void setNodeIdentityManager(NodeIdentityManager *n) { m_nodeIdentityManager = n; }
+  void setSecurityManager(SecurityManager *s) { m_securityManager = s; }
+  void setHealthManager(HealthManager *h) { m_healthManager = h; }
+  void setAuditManager(AuditManager *a) { m_auditManager = a; }
+  void setProvisioningManager(ProvisioningManager *p) { m_provisioningManager = p; }
+  void setBackupManager(BackupManager *b) { m_backupManager = b; }
+  void setRestoreManager(RestoreManager *r) { m_restoreManager = r; }
   void broadcastWs(const uint8_t *payload, size_t len, httpd_ws_type_t type);
   void setWSBackLogSize(const uint16_t size);
 
@@ -143,6 +159,19 @@ private:
   static esp_err_t handleCertificateStatus(httpd_req_t *req);
   static esp_err_t handleCertificateDelete(httpd_req_t *req);
 
+  // Household / node / backup / recovery / provisioning endpoints
+  static esp_err_t handleGetHousehold(httpd_req_t *req);
+  static esp_err_t handleGetNode(httpd_req_t *req);
+  static esp_err_t handleGetHealth(httpd_req_t *req);
+  static esp_err_t handleGetSecurity(httpd_req_t *req);
+  static esp_err_t handleGetAudit(httpd_req_t *req);
+  static esp_err_t handleGetBackup(httpd_req_t *req);
+  static esp_err_t handleCreateBackup(httpd_req_t *req);
+  static esp_err_t handleRestoreBackup(httpd_req_t *req);
+  static esp_err_t handleExportRecovery(httpd_req_t *req);
+  static esp_err_t handleIssueProvisioning(httpd_req_t *req);
+  static esp_err_t handleJoinHousehold(httpd_req_t *req);
+
   static void captivePortalSaveTask(void* pvParameters);
   static void captivePortalEthSaveTask(void* pvParameters);
   static esp_err_t handleCaptivePortal(httpd_req_t *req);
@@ -195,6 +224,14 @@ private:
   httpd_handle_t m_server;
   static const char *TAG;
   std::string m_sessionId;
+  HouseholdManager *m_householdManager = nullptr;
+  NodeIdentityManager *m_nodeIdentityManager = nullptr;
+  SecurityManager *m_securityManager = nullptr;
+  HealthManager *m_healthManager = nullptr;
+  AuditManager *m_auditManager = nullptr;
+  ProvisioningManager *m_provisioningManager = nullptr;
+  BackupManager *m_backupManager = nullptr;
+  RestoreManager *m_restoreManager = nullptr;
 
   // True while the captive-portal route set is installed, i.e. while the device is
   // in setup AP mode. That portal has to stay reachable without Web UI credentials,

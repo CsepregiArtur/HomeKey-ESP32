@@ -314,7 +314,7 @@ dependencies:
       type: service
     version: 2.1.0
   espressif/esp_rainmaker:
-    component_hash: 74e70026b0cf06b1b56d5324667b431bd784d71bdfd20a9e6fb134698dfac129
+    component_hash: 0f0f781677173826eee568d53f04b27e44fbe72c2bfc21929e4a5239fbe831d2
     dependencies:
     - name: espressif/cbor
       registry_url: https://components.espressif.com
@@ -357,7 +357,7 @@ dependencies:
     source:
       registry_url: https://components.espressif.com
       type: service
-    version: 1.16.0
+    version: 1.16.1
   espressif/esp_schedule:
     component_hash: 52d305300abcee86034c309eb200feb2dfbc95fcbfc5b7b9dcd137763a995dbf
     dependencies:
@@ -488,7 +488,7 @@ dependencies:
       type: service
     version: 1.0.0
   espressif/rmaker_common:
-    component_hash: ee65381bc5ec077390be5c68d03aacb4f3846cbb93ca79a730d94e941304a6a0
+    component_hash: bfb0fc9a19686e4fc61da00e10d1db03fecb712d79d2a34c5fbb3fd41ef5f026
     dependencies:
     - name: espressif/mqtt
       registry_url: https://components.espressif.com
@@ -503,7 +503,7 @@ dependencies:
     - name: espressif/rmaker_common_events
       registry_url: https://components.espressif.com
       require: private
-      version: ^1.0.0
+      version: ^1.1.0
     - name: espressif/rmaker_console
       registry_url: https://components.espressif.com
       require: private
@@ -526,9 +526,9 @@ dependencies:
     source:
       registry_url: https://components.espressif.com
       type: service
-    version: 1.8.6
+    version: 1.9.0
   espressif/rmaker_common_events:
-    component_hash: ced95feff88c368e6306ff67ff3696ac76a5273de9fe1f907a7c115d4370fe6e
+    component_hash: 57df0770974627a57a2c4d459a4ec93d707d2b9c029966128ddf262fed982c5d
     dependencies:
     - name: idf
       require: private
@@ -536,7 +536,7 @@ dependencies:
     source:
       registry_url: https://components.espressif.com
       type: service
-    version: 1.0.0
+    version: 1.1.0
   espressif/rmaker_console:
     component_hash: 22f38fe0ec9c84257427dad9a92e09ddbba48a6278eae42b0b167589f0e79f20
     dependencies:
@@ -614,6 +614,6 @@ direct_dependencies:
 - espressif/libsodium
 - idf
 - joltwallet/littlefs
-manifest_hash: 7796deee5d1bc141c025c545dd6f11122916567ebb784c3569f5c4eb9d8bae2c
+manifest_hash: db387e12200ef576b0cc5ec424dd5384f1ffca06bcb1114b02bbb643068176b8
 target: esp32
 version: 2.0.0

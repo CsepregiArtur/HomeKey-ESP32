@@ -5,10 +5,10 @@
   import CertManager from './CertManager.svelte';
   import { systemInfo } from '$lib/stores/system.svelte';
 
-  let { mqtt, error }: { mqtt: MqttConfig; error: string | null } = $props();
+  let { mqtt, error }: { mqtt: MqttConfig | null | undefined; error?: string | null | undefined } = $props();
 
   // svelte-ignore state_referenced_locally
-  let mqttConfig = $state<MqttConfig>($state.snapshot(mqtt));
+  let mqttConfig = $state<MqttConfig>($state.snapshot(mqtt ?? ({} as MqttConfig)));
   let activeTab = $state<'broker' | 'topics' | 'ssl'>('broker');
 
   let mqttConnected = $derived<boolean>(systemInfo.mqtt_connected);

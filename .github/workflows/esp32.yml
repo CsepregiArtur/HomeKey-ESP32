@@ -32,6 +32,17 @@ jobs:
         uses: actions/github-script@v9
         with:
           script: |
+            // Create the `dev` tag if it is missing, otherwise move it to the
+            // current commit. GitHub answers a GET on a missing ref with 404, but
+            // a PATCH (updateRef) with 422 "Reference does not exist" — so both
+            // must be treated as "missing, create it" or the first run fails.
+            const isMissingRef = (e) => {
+              const status = e.status ?? (e.response && e.response.status);
+              const message = (e.response?.data?.message || e.message || '');
+              return status === 404 || status === 422 ||
+                     /does not exist|not found/i.test(message);
+            };
+
             let previousSha = '';
             try {
               const { data: ref } = await github.rest.git.getRef({
@@ -41,11 +52,10 @@ jobs:
               });
               previousSha = ref.object.sha;
             } catch (e) {
-              if (e.status !== 404 && (!e.response || e.response.status !== 404)) {
-                throw e;
-              }
+              if (!isMissingRef(e)) throw e;
             }
             core.setOutput('previous_sha', previousSha);
+
             try {
               await github.rest.git.updateRef({
                 owner: context.repo.owner,
@@ -54,17 +64,16 @@ jobs:
                 sha: context.sha,
                 force: true
               });
+              console.log(`Moved dev tag to ${context.sha}`);
             } catch (e) {
-              if (e.status === 404 || (e.response && e.response.status === 404)) {
-                await github.rest.git.createRef({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  ref: 'refs/tags/dev',
-                  sha: context.sha
-                });
-              } else {
-                throw e;
-              }
+              if (!isMissingRef(e)) throw e;
+              await github.rest.git.createRef({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                ref: 'refs/tags/dev',
+                sha: context.sha
+              });
+              console.log(`Created dev tag at ${context.sha}`);
             }
       - name: Replace dev release body
         uses: actions/github-script@v9

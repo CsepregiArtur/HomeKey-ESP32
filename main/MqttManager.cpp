@@ -4,15 +4,37 @@
 #include "LockManager.hpp"
 #include "ConfigManager.hpp"
 #include "JsonGuard.hpp"
+#include "HouseholdManager.hpp"
+#include "NodeIdentityManager.hpp"
+#include "HealthManager.hpp"
+#include "AuditManager.hpp"
 #include <cstdlib>
+#include <cstring>
+#include <algorithm>
+#include <array>
 #include <esp_log.h>
 #include <esp_app_desc.h>
+#include <esp_timer.h>
+#include <sodium.h>
+#include <cJSON.h>
+#include <ctime>
 #include "eventStructs.hpp"
 #include <string>
 #include <vector>
-#include <cstring>
 
 const char* MqttManager::TAG = "MqttManager";
+
+namespace {
+/// Wall-clock seconds when available, falling back to monotonic uptime (same
+/// convention as BackupManager). Used only for safe telemetry timestamps.
+uint64_t wallClockSeconds() {
+    const time_t t = time(nullptr);
+    if (t > 1000000000) {
+        return static_cast<uint64_t>(t);
+    }
+    return static_cast<uint64_t>(esp_timer_get_time() / 1000000ULL);
+}
+} // namespace
 
 /**
  * @brief Initialize MqttManager from configuration and register MQTT-related event subscribers and publishers.
@@ -103,6 +125,7 @@ bool MqttManager::begin(std::string deviceID) {
             if(s.status){
               publishHomeKeyTap(s.issuerId, s.endpointId, s.readerId);
             }
+            publishLastAuth("HomeKey", s.status ? "SUCCESS" : "FAILURE");
           } else {
             ESP_LOGE(TAG, "Failed to deserialize HomeKey event: %s", ec.message().c_str());
             return;
@@ -350,9 +373,24 @@ void MqttManager::onConnected() {
         if (ret < 0) ESP_LOGW(TAG, "Failed to subscribe to lockCustomStateCmd");
     }
 
+    // Household/node authenticated command topics (only when enrolled).
+    const std::string base = baseTopic();
+    if (!base.empty()) {
+        const std::string cmdLock = base + "/command/lock";
+        const std::string cmdUnlock = base + "/command/unlock";
+        ret = esp_mqtt_client_subscribe(m_client, cmdLock.c_str(), 1);
+        if (ret < 0) ESP_LOGW(TAG, "Failed to subscribe to command/lock");
+        ret = esp_mqtt_client_subscribe(m_client, cmdUnlock.c_str(), 1);
+        if (ret < 0) ESP_LOGW(TAG, "Failed to subscribe to command/unlock");
+    }
+
     if (m_mqttConfig.hassMqttDiscoveryEnabled) {
         publishHassDiscovery();
     }
+
+    // Node telemetry is independent of HASS discovery; publish it immediately on
+    // connect so household entities have state before the next periodic update.
+    publishNodeStatus();
 }
 
 /**
@@ -366,11 +404,17 @@ void MqttManager::onConnected() {
  */
 void MqttManager::onData(const std::string& topic, const std::string& data) {
     ESP_LOGI(TAG, "Received message on topic '%s': %s", topic.c_str(), data.c_str());
-    
+
+    // Authenticated household command namespace is handled separately; it is
+    // never processed through the legacy numeric topic path below.
+    if (handleSecureCommand(topic, data)) {
+        return;
+    }
+
     auto to_u8 = [](const std::string &str, uint8_t& out) -> bool {
       const char* begin = str.c_str(); char* end = nullptr;
       unsigned long v = strtoul(begin, &end, 10);
-      if(end == begin || v < 0 || v > 255) return false;
+      if(end == begin || v > 255) return false;
       out = static_cast<uint8_t>(v); return true;
     };
     EventLockState s{
@@ -608,6 +652,76 @@ void MqttManager::publishHassDiscovery() {
         });
     }
 
+    // Household/node entities (only when enrolled). Stable unique id:
+    // <household_id>_<node_id>_<entity>.
+    const std::string base = baseTopic();
+    if (!base.empty() && m_household && m_node) {
+        const std::string nodeUid = m_household->info().household_id + "_" + m_node->info().node_id;
+
+        // Every household entity MUST get its own discovery topic (object id), or
+        // Home Assistant keeps only the last config published on a shared topic.
+        // Convention: discovery object id == unique-id suffix ==
+        // "<hid>_<nid>_<entity>", except the node-online binary_sensor which keeps
+        // the bare "<hid>_<nid>" object id. All ids are stable across reconnect and
+        // reboot (retained configs; deterministic construction from household/node).
+        auto publishNodeConfig = [&](const char* name, const std::string& component,
+                                     const std::string& objectId, const std::string& entityId,
+                                     auto fillPayload) {
+            JsonBuilder payload = JsonBuilder::object();
+            if (!payload) {
+                ESP_LOGE(TAG, "Failed to allocate node discovery JSON object (OOM)");
+                return;
+            }
+            payload.addString("name", name);
+            payload.addString("unique_id", (nodeUid + "_" + entityId).c_str());
+            payload.addItem("device", JsonGuard(cJSON_Duplicate(device.get(), true)));
+            fillPayload(payload);
+            publish("homeassistant/" + component + "/" + objectId + "/config",
+                    payload.toStringFormatted(), 1, true);
+        };
+
+        publishNodeConfig("Node online", "binary_sensor", nodeUid, "online", [&](JsonBuilder& p) {
+            p.addString("state_topic", (base + "/status").c_str());
+            p.addString("payload_on", "online");
+            p.addString("payload_off", "offline");
+            // MQTT allows a single will per connection, and the ESP-IDF client's
+            // will is already configured on the legacy availability topic. The
+            // household node presence therefore reuses that broker LWT via
+            // availability_topic (additive; the legacy behaviour is untouched), so
+            // the entity goes unavailable on an unexpected disconnect instead of
+            // staying permanently online.
+            p.addString("availability_topic", m_mqttConfig.lwtTopic.c_str());
+            p.addString("payload_available", "online");
+            p.addString("payload_not_available", "offline");
+        });
+        publishNodeConfig("Node health", "sensor", nodeUid + "_health", "health", [&](JsonBuilder& p) {
+            p.addString("state_topic", (base + "/health").c_str());
+            p.addString("value_template", "{{ value_json.mqtt }}");
+        });
+
+        // Household entities with stable, self-describing unique ids:
+        // <household_id>_<node_id>_<entity>.
+        publishNodeConfig("Backup status", "sensor", nodeUid + "_backup", "backup", [&](JsonBuilder& p) {
+            p.addString("state_topic", (base + "/backup/last").c_str());
+            p.addString("value_template", "{{ value_json.status }}");
+            p.addString("json_attributes_topic", (base + "/backup/last").c_str());
+            p.addString("json_attributes_template", "{{ value_json | tojson }}");
+        });
+        publishNodeConfig("Security status", "sensor", nodeUid + "_security", "security", [&](JsonBuilder& p) {
+            p.addString("state_topic", (base + "/security").c_str());
+        });
+        publishNodeConfig("Firmware version", "sensor", nodeUid + "_firmware", "firmware", [&](JsonBuilder& p) {
+            p.addString("state_topic", (base + "/state").c_str());
+            p.addString("value_template", "{{ value_json.firmware_version }}");
+        });
+        publishNodeConfig("Last HomeKey authentication", "sensor", nodeUid + "_last_auth", "last_auth", [&](JsonBuilder& p) {
+            p.addString("state_topic", (base + "/last_auth").c_str());
+            p.addString("value_template", "{{ value_json.result }}");
+            p.addString("json_attributes_topic", (base + "/last_auth").c_str());
+            p.addString("json_attributes_template", "{{ value_json | tojson }}");
+        });
+    }
+
     ESP_LOGI(TAG, "HASS discovery messages published.");
 }
 
@@ -695,4 +809,183 @@ void MqttManager::publishMqttStatus(bool connected, MqttErrorCode errorCode, con
     m_lastErrorCode = errorCode;
     m_lastErrorMessage = errorMessage;
     ESP_LOGD(TAG, "Updated MQTT status: connected=%s, errorCode=%d", connected ? "true" : "false", static_cast<uint8_t>(errorCode));
+}
+
+// ============================================================================
+// Household / node namespace + authenticated commands
+// ============================================================================
+
+std::string MqttManager::baseTopic() const {
+    if (!m_household || !m_node) {
+        return "";
+    }
+    const auto &hh = m_household->info();
+    const auto &nd = m_node->info();
+    if (hh.household_id.empty() || nd.node_id.empty()) {
+        return "";
+    }
+    return "homekey/household/" + hh.household_id + "/nodes/" + nd.node_id;
+}
+
+void MqttManager::publishNodeStatus() {
+    const std::string base = baseTopic();
+    if (base.empty() || !m_client) {
+        return;
+    }
+    const auto &hh = m_household->info();
+    const auto &nd = m_node->info();
+
+    std::string state = fmt::format(
+        "{{\"household_id\":\"{}\",\"node_id\":\"{}\",\"node_name\":\"{}\",\"node_role\":\"{}\","
+        "\"node_state\":\"{}\",\"generation\":{},\"firmware_version\":\"{}\"}}",
+        hh.household_id, nd.node_id, nd.node_name, household::nodeRoleToString(nd.node_role),
+        household::nodeStateToString(nd.state), nd.generation, esp_app_get_description()->version);
+    publish(base + "/state", state, 0, true);
+    publish(base + "/status", "online", 1, true);
+
+    if (m_health) {
+        const HealthManager::Snapshot snap = m_health->snapshot();
+        publish(base + "/health", m_health->toJson(snap), 0, false);
+        // Compact security state (OK / WARNING / ERROR). ERROR is reserved for
+        // when the posture cannot be computed; the firmware currently emits OK or
+        // WARNING only. No numeric score.
+        publish(base + "/security", snap.security_all_ok ? "OK" : "WARNING", 0, true);
+    }
+}
+
+void MqttManager::publishBackupStatus(const std::string &status) {
+    const std::string base = baseTopic();
+    if (base.empty()) {
+        return;
+    }
+    publish(base + "/backup/status", status, 0, true);
+    // Metadata-only summary (state + wall-clock timestamp). The encrypted backup
+    // contents are never published to MQTT.
+    publish(base + "/backup/last",
+            fmt::format("{{\"status\":\"{}\",\"timestamp\":{}}}", status, wallClockSeconds()),
+            0, true);
+}
+
+void MqttManager::publishLastAuth(const std::string &authType, const std::string &result) {
+    const std::string base = baseTopic();
+    if (base.empty()) {
+        return;
+    }
+    // Safe metadata only: type, result, timestamp. No credential identifiers,
+    // raw APDU, cryptographic material or HomeKey secrets.
+    publish(base + "/last_auth",
+            fmt::format("{{\"type\":\"{}\",\"result\":\"{}\",\"timestamp\":{}}}",
+                        authType, result, wallClockSeconds()),
+            0, true);
+}
+
+std::string MqttManager::makeCommandMac(uint64_t ts, const std::string &nonce,
+                                        const std::string &reqId, const std::string &action,
+                                        const std::vector<uint8_t> &key) {
+    const std::string canonical = fmt::format("{}{}{}{}", ts, nonce, reqId, action);
+    std::vector<uint8_t> mac(crypto_auth_hmacsha256_BYTES);
+    crypto_auth_hmacsha256(mac.data(),
+                           reinterpret_cast<const unsigned char *>(canonical.data()), canonical.size(),
+                           key.data());
+    static const char *digits = "0123456789abcdef";
+    std::string hex;
+    for (uint8_t b : mac) {
+        hex.push_back(digits[b >> 4]);
+        hex.push_back(digits[b & 0x0F]);
+    }
+    return hex;
+}
+
+bool MqttManager::handleSecureCommand(const std::string &topic, const std::string &data) {
+    const std::string base = baseTopic();
+    if (base.empty()) {
+        return false;
+    }
+    const std::string cmdUnlock = base + "/command/unlock";
+    const std::string cmdLock = base + "/command/lock";
+    std::string action;
+    if (topic == cmdUnlock) {
+        action = "unlock";
+    } else if (topic == cmdLock) {
+        action = "lock";
+    } else {
+        return false;
+    }
+
+    const std::vector<uint8_t> key = m_household->deriveCommandKey();
+    if (key.empty()) {
+        ESP_LOGW(TAG, "No household command key; rejecting authenticated command.");
+        return true; // recognized topic, but failed closed
+    }
+
+    cJSON *root = cJSON_Parse(data.c_str());
+    if (!root) {
+        ESP_LOGW(TAG, "Malformed authenticated command payload.");
+        return true;
+    }
+    const cJSON *tsNode = cJSON_GetObjectItemCaseSensitive(root, "ts");
+    const cJSON *nonceNode = cJSON_GetObjectItemCaseSensitive(root, "nonce");
+    const cJSON *reqNode = cJSON_GetObjectItemCaseSensitive(root, "req_id");
+    const cJSON *macNode = cJSON_GetObjectItemCaseSensitive(root, "mac");
+    const bool ok = cJSON_IsNumber(tsNode) && cJSON_IsString(nonceNode) &&
+                    cJSON_IsString(reqNode) && cJSON_IsString(macNode);
+    if (!ok) {
+        cJSON_Delete(root);
+        ESP_LOGW(TAG, "Authenticated command missing required fields.");
+        return true;
+    }
+    const uint64_t ts = static_cast<uint64_t>(tsNode->valuedouble);
+    const std::string nonce = nonceNode->valuestring;
+    const std::string reqId = reqNode->valuestring;
+    const std::string mac = macNode->valuestring;
+
+    const std::string expected = makeCommandMac(ts, nonce, reqId, action, key);
+    if (expected.size() != mac.size() ||
+        sodium_memcmp(expected.data(), mac.data(), mac.size()) != 0) {
+        cJSON_Delete(root);
+        ESP_LOGW(TAG, "Authenticated command MAC mismatch; rejected.");
+        if (m_audit) {
+            m_audit->record(AuditManager::MQTT_UNLOCK_REQUEST, AuditManager::SOURCE_MQTT,
+                            AuditManager::RESULT_FAILURE, m_node->info().node_id, "bad_mac");
+        }
+        return true;
+    }
+
+    // Freshness: optional wall-clock window; replay is stopped by the nonce set.
+    const time_t now = time(nullptr);
+    if (now > 1000000000) {
+        const int64_t skew = static_cast<int64_t>(ts) - static_cast<int64_t>(now);
+        if (skew < -300 || skew > 300) {
+            cJSON_Delete(root);
+            ESP_LOGW(TAG, "Authenticated command outside time window; rejected.");
+            return true;
+        }
+    }
+
+    // Replay protection.
+    if (std::find(m_seenNonces.begin(), m_seenNonces.end(), nonce) != m_seenNonces.end()) {
+        cJSON_Delete(root);
+        ESP_LOGW(TAG, "Replayed command nonce rejected.");
+        return true;
+    }
+    m_seenNonces.push_back(nonce);
+    if (m_seenNonces.size() > 32) {
+        m_seenNonces.pop_front();
+    }
+    cJSON_Delete(root);
+
+    EventLockState s{.source = LockManager::MQTT};
+    s.currentState = LockManager::UNKNOWN;
+    s.targetState = (action == "unlock") ? LockManager::UNLOCKED : LockManager::LOCKED;
+    std::array<uint8_t, sizeof(EventLockState)> d{};
+    const size_t dLen = alpaca::serialize(s, d);
+    AppEventLoop::publish(LOCK_EVENT, LOCK_TARGET_STATE_CHANGED, d.data(), dLen);
+
+    if (m_audit) {
+        m_audit->record(action == "unlock" ? AuditManager::MQTT_UNLOCK_REQUEST : AuditManager::LOCK,
+                        AuditManager::SOURCE_MQTT, AuditManager::RESULT_SUCCESS,
+                        m_node->info().node_id, reqId);
+    }
+    ESP_LOGI(TAG, "Authenticated %s command accepted (req %s).", action.c_str(), reqId.c_str());
+    return true;
 }

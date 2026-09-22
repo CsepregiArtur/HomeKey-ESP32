@@ -4,6 +4,7 @@
 #include "HomeSpan.h"
 #include "config.hpp"
 #include <esp_event.h>
+#include <esp_timer.h>
 #include "dns_server.h"
 #include "HomeKitLock.hpp"
 #include "LockManager.hpp"
@@ -25,6 +26,19 @@
 #include "WebSocketLogSinker.h"
 #include "lwip/inet.h"
 #include "nvs_flash.h"
+#include "household_types.hpp"
+#include "HouseholdManager.hpp"
+#include "NodeIdentityManager.hpp"
+#include "ProvisioningManager.hpp"
+#include "SecurityManager.hpp"
+#include "AuditManager.hpp"
+#include "HealthManager.hpp"
+#include "BackupManager.hpp"
+#include "RestoreManager.hpp"
+#include "eventStructs.hpp"
+#include "app_event_loop.hpp"
+#include <span>
+#include <system_error>
 
 std::unique_ptr<LockManager> lockManager;
 NvsCredentialStore readerDataManager;
@@ -34,6 +48,22 @@ std::unique_ptr<MqttManager> mqttManager;
 WebServerManager webServerManager(configManager, readerDataManager);
 std::unique_ptr<HomeKitLock> homekitLock;
 std::unique_ptr<NfcManager> nfcManager;
+
+// Household / multi-node managers.
+std::unique_ptr<HouseholdManager> householdManager;
+std::unique_ptr<NodeIdentityManager> nodeIdentityManager;
+std::unique_ptr<ProvisioningManager> provisioningManager;
+std::unique_ptr<SecurityManager> securityManager;
+std::unique_ptr<AuditManager> auditManager;
+std::unique_ptr<HealthManager> healthManager;
+std::unique_ptr<BackupManager> backupManager;
+std::unique_ptr<RestoreManager> restoreManager;
+
+// Held-open subscriptions for the audit hooks and backup status relay.
+static AppEventLoop::SubscriptionHandle s_auditNfcSub;
+static AppEventLoop::SubscriptionHandle s_auditLockSub;
+static AppEventLoop::SubscriptionHandle s_backupDoneSub;
+static AppEventLoop::SubscriptionHandle s_backupFailSub;
 
 static dns_server_handle_t dns_server = NULL;
 
@@ -273,6 +303,46 @@ bool initLogging(){
 }
 
 /**
+ * @brief Subscribe the audit log to the security-relevant events that occur on this node.
+ *
+ * HomeKey tap results and lock/unlock transitions are the primary local events;
+ * web login and MQTT command audits are recorded by their respective managers.
+ */
+static void setupAuditHooks() {
+  const std::string nodeId = nodeIdentityManager ? nodeIdentityManager->info().node_id : "";
+  s_auditNfcSub = AppEventLoop::subscribe(NFC_EVENT, NFC_TAP_EVENT, [nodeId](const uint8_t *data, size_t size) {
+    if (!data || size == 0) return;
+    std::span<const uint8_t> payload(data, size);
+    std::error_code ec;
+    NfcEvent nfc_event = alpaca::deserialize<NfcEvent>(payload, ec);
+    if (ec) return;
+    if (nfc_event.type == HOMEKEY_TAP) {
+      EventHKTap s = alpaca::deserialize<EventHKTap>(nfc_event.data, ec);
+      if (ec) return;
+      auditManager->record(s.status ? AuditManager::HOMEKEY_AUTH_SUCCESS
+                                    : AuditManager::HOMEKEY_AUTH_FAILURE,
+                           AuditManager::SOURCE_NFC,
+                           s.status ? AuditManager::RESULT_SUCCESS : AuditManager::RESULT_FAILURE,
+                           nodeId);
+    }
+  });
+  s_auditLockSub = AppEventLoop::subscribe(LOCK_EVENT, LOCK_STATE_CHANGED, [nodeId](const uint8_t *data, size_t size) {
+    if (!data || size == 0) return;
+    std::span<const uint8_t> payload(data, size);
+    std::error_code ec;
+    EventLockState s = alpaca::deserialize<EventLockState>(payload, ec);
+    if (ec) return;
+    if (s.currentState == 0) {
+      auditManager->record(AuditManager::UNLOCK, AuditManager::SOURCE_LOCAL,
+                           AuditManager::RESULT_SUCCESS, nodeId);
+    } else if (s.currentState == 1) {
+      auditManager->record(AuditManager::LOCK, AuditManager::SOURCE_LOCAL,
+                           AuditManager::RESULT_SUCCESS, nodeId);
+    }
+  });
+}
+
+/**
  * @brief Initialize runtime, configure logging/serial, and instantiate core subsystem managers.
  *
  * Initializes the global runtime infrastructure (Sinker), sets logging levels and Serial,
@@ -337,11 +407,31 @@ void setup() {
   // Must happen before any manager starts so the Web UI, MQTT and HomeSpan all
   // come up using the credentials this generates on a factory-fresh device.
   securityInit();
+
+  // --- Household / node model (never erases existing config or HomeKey data) ---
+  householdManager = std::make_unique<HouseholdManager>();
+  householdManager->begin();
+  householdManager->migrate();
+  nodeIdentityManager = std::make_unique<NodeIdentityManager>();
+  nodeIdentityManager->begin();
+  provisioningManager = std::make_unique<ProvisioningManager>();
+  provisioningManager->begin();
+  auditManager = std::make_unique<AuditManager>();
+  auditManager->begin();
+  securityManager = std::make_unique<SecurityManager>(configManager);
+  healthManager = std::make_unique<HealthManager>();
+  healthManager->begin();
+
   hardwareManager = std::make_unique<HardwareManager>(configManager.getConfig<espConfig::actions_config_t>());
   lockManager = std::make_unique<LockManager>(configManager.getConfig<espConfig::misc_config_t>(), configManager.getConfig<espConfig::actions_config_t>());
   mqttManager = std::make_unique<MqttManager>(configManager);
   homekitLock = std::make_unique<HomeKitLock>(lambda, *lockManager, configManager, readerDataManager);
   espConfig::misc_config_t miscConfig = configManager.getConfig<espConfig::misc_config_t>();
+  // A node identity is minted once per device (migration) so every node has a
+  // stable id from here on. Replacing a node later always creates a NEW identity.
+  if (!nodeIdentityManager->hasIdentity()) {
+    nodeIdentityManager->generateIdentity(household::NodeRole::OTHER, miscConfig.deviceName);
+  }
   static const char* TAG = "Main";
   if(miscConfig.nfcPinsPreset != PIN_UNSET){
     ESP_LOGI(TAG, "NFC GPIO pins preset: %s", nfcGpioPinsPresets[miscConfig.nfcPinsPreset].name.c_str());
@@ -379,6 +469,36 @@ void setup() {
 
   webServerManager.setNfcManager(nfcManager.get());
   webServerManager.setMqttManager(mqttManager.get());
+  webServerManager.setHouseholdManager(householdManager.get());
+  webServerManager.setNodeIdentityManager(nodeIdentityManager.get());
+  webServerManager.setSecurityManager(securityManager.get());
+  webServerManager.setHealthManager(healthManager.get());
+  webServerManager.setAuditManager(auditManager.get());
+  webServerManager.setProvisioningManager(provisioningManager.get());
+  mqttManager->setHouseholdManager(householdManager.get());
+  mqttManager->setNodeIdentityManager(nodeIdentityManager.get());
+  mqttManager->setHealthManager(healthManager.get());
+  mqttManager->setAuditManager(auditManager.get());
+
+  healthManager->setSecurityManager(securityManager.get());
+  healthManager->setNfcManager(nfcManager.get());
+  healthManager->setMqttManager(mqttManager.get());
+  healthManager->setLockManager(lockManager.get());
+  backupManager = std::make_unique<BackupManager>(*householdManager, *nodeIdentityManager,
+                                                  configManager, readerDataManager, *auditManager);
+  backupManager->begin();
+  restoreManager = std::make_unique<RestoreManager>(*householdManager, *nodeIdentityManager,
+                                                    configManager, readerDataManager, *auditManager);
+  restoreManager->begin();
+  webServerManager.setBackupManager(backupManager.get());
+  webServerManager.setRestoreManager(restoreManager.get());
+  setupAuditHooks();
+
+  s_backupDoneSub = AppEventLoop::subscribe(BACKUP_EVENT, BACKUP_COMPLETED,
+    [](const uint8_t *, size_t) { if (mqttManager) mqttManager->publishBackupStatus("completed"); });
+  s_backupFailSub = AppEventLoop::subscribe(BACKUP_EVENT, BACKUP_FAILED,
+    [](const uint8_t *, size_t) { if (mqttManager) mqttManager->publishBackupStatus("failed"); });
+
   hardwareManager->begin();
   homekitLock->begin();
   // HomeSpan keeps the SRP verification data for the Setup Code in its own NVS
@@ -403,5 +523,17 @@ void setup() {
 void loop() {
   if(pollHS)
     homeSpan.poll();
+
+  // Publish household node telemetry on a slow cadence so the MQTT entities
+  // (state/health/security/backup) stay fresh without hammering NVS or MQTT.
+  static int64_t lastNodePublishUs = 0;
+  const int64_t nowUs = esp_timer_get_time();
+  if (nowUs - lastNodePublishUs >= 30 * 1000000LL) {
+    lastNodePublishUs = nowUs;
+    if (mqttManager && mqttManager->isConnected()) {
+      mqttManager->publishNodeStatus();
+    }
+  }
+
   vTaskDelay(pdMS_TO_TICKS(50));
 }

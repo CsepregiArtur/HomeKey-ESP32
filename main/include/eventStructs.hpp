@@ -86,3 +86,44 @@ struct EventNfcStatus {
     uint8_t firmwareVersionMajor;
     uint8_t firmwareVersionMinor;
 };
+
+// --- Household / Node / Backup / Audit / Health / Provisioning / Security ---
+
+struct EventHouseholdState {
+    uint8_t state;                 ///< household::HouseholdState
+    std::string household_id;
+    std::string household_name;
+};
+
+struct EventNodeState {
+    uint8_t state;                 ///< household::NodeState
+    std::string node_id;
+    std::string node_name;
+    std::string household_id;
+};
+
+struct EventBackupStatus {
+    uint8_t event;                 ///< BACKUP_*/RESTORE_* id
+    bool success;
+    std::string message;           ///< bounded, safe text only
+};
+
+struct EventAuditRecord {
+    uint32_t timestamp;
+    uint8_t event_type;
+    uint8_t source;
+    uint8_t result;
+    std::string node_id;
+    std::string metadata;          ///< bounded, safe text only — never secrets
+};
+
+struct EventProvisionState {
+    uint8_t state;                 ///< provisioning sub-state
+    bool success;
+    std::string message;
+};
+
+struct EventSecurityPosture {
+    bool all_ok;
+    std::string warnings;          ///< newline-joined named warnings
+};

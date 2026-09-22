@@ -4,7 +4,7 @@
   import { calculateWifiSignal } from "$lib/utils/wifi.js";
   const version: string = __DEV__ ? "dev" : __VERSION__;
 
-  let { hkInfo, error }: { hkInfo: HKInfo | null; error: string | null } =
+  let { hkInfo, error }: { hkInfo: HKInfo | null | undefined; error: string | null | undefined } =
     $props();
 
   let wifi_rssi = $derived(systemInfo?.wifi_rssi);

@@ -16,6 +16,14 @@
 #include "MqttManager.hpp"
 #include "NfcManager.hpp"
 #include "ReaderDataManager.hpp"
+#include "HouseholdManager.hpp"
+#include "NodeIdentityManager.hpp"
+#include "SecurityManager.hpp"
+#include "HealthManager.hpp"
+#include "AuditManager.hpp"
+#include "ProvisioningManager.hpp"
+#include "BackupManager.hpp"
+#include "RestoreManager.hpp"
 #include "cJSON.h"
 #include "config.hpp"
 #include "esp_chip_info.h"
@@ -689,6 +697,19 @@ void WebServerManager::setupRoutes() {
       {"/certificates", HTTP_POST, handleCertificateUpload, this},
       {"/certificates", HTTP_GET, handleCertificateStatus, this},
       {"/certificates", HTTP_DELETE, handleCertificateDelete, this},
+
+      // Household / node / backup / recovery / provisioning endpoints
+      {"/household", HTTP_GET, handleGetHousehold, this},
+      {"/node", HTTP_GET, handleGetNode, this},
+      {"/health", HTTP_GET, handleGetHealth, this},
+      {"/security", HTTP_GET, handleGetSecurity, this},
+      {"/audit", HTTP_GET, handleGetAudit, this},
+      {"/backup", HTTP_GET, handleGetBackup, this},
+      {"/backup/create", HTTP_POST, handleCreateBackup, this},
+      {"/backup/restore", HTTP_POST, handleRestoreBackup, this},
+      {"/recovery/export", HTTP_POST, handleExportRecovery, this},
+      {"/provision/issue", HTTP_POST, handleIssueProvisioning, this},
+      {"/provision/join", HTTP_POST, handleJoinHousehold, this},
 
       // Catch-all (must be last)
       {"/*", HTTP_GET, handleRootOrHash, this}};
@@ -2903,4 +2924,273 @@ esp_err_t WebServerManager::handleCertificateDelete(httpd_req_t *req) {
   }
 
   return sendJsonError(req, "Failed to delete certificate", HTTPD_500);
+}
+
+// ============================================================================
+// Household / node / backup / recovery / provisioning endpoints
+// ============================================================================
+
+namespace {
+
+std::string hexEncodeBytes(const std::vector<uint8_t> &bytes) {
+    static const char *digits = "0123456789abcdef";
+    std::string out;
+    out.reserve(bytes.size() * 2);
+    for (uint8_t b : bytes) {
+        out.push_back(digits[b >> 4]);
+        out.push_back(digits[b & 0x0F]);
+    }
+    return out;
+}
+
+int hexDigitVal(char c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return -1;
+}
+
+std::vector<uint8_t> hexDecodeBytes(const std::string &in) {
+    std::vector<uint8_t> out;
+    if (in.size() % 2 != 0) return out;
+    for (size_t i = 0; i < in.size(); i += 2) {
+        const int hi = hexDigitVal(in[i]);
+        const int lo = hexDigitVal(in[i + 1]);
+        if (hi < 0 || lo < 0) return {};
+        out.push_back(static_cast<uint8_t>((hi << 4) | lo));
+    }
+    return out;
+}
+
+void sendJsonStr(httpd_req_t *req, const std::string &body, const char *status = nullptr) {
+    if (status) {
+        httpd_resp_set_status(req, status);
+    }
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, body.c_str());
+}
+
+} // namespace
+
+esp_err_t WebServerManager::handleGetHousehold(httpd_req_t *req) {
+    WebServerManager *instance = getInstance(req);
+    if (!instance->basicAuth(req)) return sendAuthFailure(req);
+    if (!instance->m_householdManager) {
+        return sendJsonError(req, "Household manager unavailable", "503 Service Unavailable");
+    }
+    const auto &hh = instance->m_householdManager->info();
+    sendJsonStr(req, fmt::format(
+        "{{\"household_id\":\"{}\",\"household_name\":\"{}\",\"state\":\"{}\",\"config_version\":{},"
+        "\"trust_key\":\"{}\",\"recovery_metadata\":\"{}\",\"has_recovery_secret\":{},"
+        "\"recovery_exported\":{}}}",
+        hh.household_id, hh.household_name, household::householdStateToString(hh.state),
+        hh.config_version, hexEncodeBytes(hh.trust_public_key),
+        hexEncodeBytes(hh.recovery_metadata), hh.has_recovery_secret ? "true" : "false",
+        hh.recovery_exported ? "true" : "false"));
+    return ESP_OK;
+}
+
+esp_err_t WebServerManager::handleGetNode(httpd_req_t *req) {
+    WebServerManager *instance = getInstance(req);
+    if (!instance->basicAuth(req)) return sendAuthFailure(req);
+    if (!instance->m_nodeIdentityManager) {
+        return sendJsonError(req, "Node manager unavailable", "503 Service Unavailable");
+    }
+    const auto &nd = instance->m_nodeIdentityManager->info();
+    sendJsonStr(req, fmt::format(
+        "{{\"node_id\":\"{}\",\"node_name\":\"{}\",\"node_role\":\"{}\",\"node_state\":\"{}\","
+        "\"household_id\":\"{}\",\"generation\":{},\"public_key\":\"{}\","
+        "\"cert_fingerprint\":\"{}\"}}",
+        nd.node_id, nd.node_name, household::nodeRoleToString(nd.node_role),
+        household::nodeStateToString(nd.state), nd.household_id, nd.generation,
+        hexEncodeBytes(nd.public_key), hexEncodeBytes(nd.cert_fingerprint)));
+    return ESP_OK;
+}
+
+esp_err_t WebServerManager::handleGetHealth(httpd_req_t *req) {
+    WebServerManager *instance = getInstance(req);
+    if (!instance->basicAuth(req)) return sendAuthFailure(req);
+    if (!instance->m_healthManager) {
+        return sendJsonError(req, "Health manager unavailable", "503 Service Unavailable");
+    }
+    sendJsonStr(req, instance->m_healthManager->toJson(instance->m_healthManager->snapshot()));
+    return ESP_OK;
+}
+
+esp_err_t WebServerManager::handleGetSecurity(httpd_req_t *req) {
+    WebServerManager *instance = getInstance(req);
+    if (!instance->basicAuth(req)) return sendAuthFailure(req);
+    if (!instance->m_securityManager) {
+        return sendJsonError(req, "Security manager unavailable", "503 Service Unavailable");
+    }
+    sendJsonStr(req, instance->m_securityManager->toJson(instance->m_securityManager->compute()));
+    return ESP_OK;
+}
+
+esp_err_t WebServerManager::handleGetAudit(httpd_req_t *req) {
+    WebServerManager *instance = getInstance(req);
+    if (!instance->basicAuth(req)) return sendAuthFailure(req);
+    if (!instance->m_auditManager) {
+        return sendJsonError(req, "Audit manager unavailable", "503 Service Unavailable");
+    }
+    sendJsonStr(req, instance->m_auditManager->toJson(200));
+    return ESP_OK;
+}
+
+esp_err_t WebServerManager::handleGetBackup(httpd_req_t *req) {
+    WebServerManager *instance = getInstance(req);
+    if (!instance->basicAuth(req)) return sendAuthFailure(req);
+    if (!instance->m_backupManager) {
+        return sendJsonError(req, "Backup manager unavailable", "503 Service Unavailable");
+    }
+    sendJsonStr(req, fmt::format("{{\"last_backup_time\":{},\"last_backup_hash\":\"{}\"}}",
+                                 instance->m_backupManager->lastBackupTime(),
+                                 hexEncodeBytes(instance->m_backupManager->lastBackupHash())));
+    return ESP_OK;
+}
+
+esp_err_t WebServerManager::handleCreateBackup(httpd_req_t *req) {
+    WebServerManager *instance = getInstance(req);
+    if (!instance->basicAuth(req)) return sendAuthFailure(req);
+    if (!instance->m_backupManager) {
+        return sendJsonError(req, "Backup manager unavailable", "503 Service Unavailable");
+    }
+    const std::vector<uint8_t> blob = instance->m_backupManager->createBackup();
+    if (blob.empty()) {
+        return sendJsonError(req, "Backup creation failed (no household/node identity?)", "500 Internal Server Error");
+    }
+    sendJsonStr(req, fmt::format("{{\"success\":true,\"backup\":\"{}\"}}", hexEncodeBytes(blob)));
+    return ESP_OK;
+}
+
+esp_err_t WebServerManager::handleRestoreBackup(httpd_req_t *req) {
+    WebServerManager *instance = getInstance(req);
+    if (!instance->basicAuth(req)) return sendAuthFailure(req);
+    if (!instance->m_restoreManager) {
+        return sendJsonError(req, "Restore manager unavailable", "503 Service Unavailable");
+    }
+
+    char buf[16384];
+    const int received = httpd_req_recv(req, buf, sizeof(buf) - 1);
+    if (received <= 0) {
+        return sendJsonError(req, "Empty request body", "400 Bad Request");
+    }
+    buf[received] = '\0';
+    cJSON *root = cJSON_Parse(buf);
+    if (!root) {
+        return sendJsonError(req, "Invalid JSON", "400 Bad Request");
+    }
+    const cJSON *secretNode = cJSON_GetObjectItemCaseSensitive(root, "secret");
+    const cJSON *backupNode = cJSON_GetObjectItemCaseSensitive(root, "backup");
+    const bool ok = cJSON_IsString(secretNode) && cJSON_IsString(backupNode);
+    if (!ok) {
+        cJSON_Delete(root);
+        return sendJsonError(req, "Missing 'secret' or 'backup'", "400 Bad Request");
+    }
+    const std::vector<uint8_t> secret = hexDecodeBytes(secretNode->valuestring);
+    const std::vector<uint8_t> blob = hexDecodeBytes(backupNode->valuestring);
+    cJSON_Delete(root);
+
+    std::string error;
+    if (!instance->m_restoreManager->restore(blob, secret, error)) {
+        return sendJsonError(req, error, "400 Bad Request");
+    }
+    sendJsonStr(req, "{\"success\":true,\"message\":\"Restore completed\"}");
+    return ESP_OK;
+}
+
+esp_err_t WebServerManager::handleExportRecovery(httpd_req_t *req) {
+    WebServerManager *instance = getInstance(req);
+    if (!instance->basicAuth(req)) return sendAuthFailure(req);
+    if (!instance->m_householdManager) {
+        return sendJsonError(req, "Household manager unavailable", "503 Service Unavailable");
+    }
+    std::vector<uint8_t> secret;
+    if (!instance->m_householdManager->exportRecoverySecretOnce(secret)) {
+        return sendJsonError(req, "Recovery secret already exported or unavailable", "409 Conflict");
+    }
+    sendJsonStr(req, fmt::format("{{\"success\":true,\"recovery_secret\":\"{}\"}}",
+                                 hexEncodeBytes(secret)));
+    return ESP_OK;
+}
+
+esp_err_t WebServerManager::handleIssueProvisioning(httpd_req_t *req) {
+    WebServerManager *instance = getInstance(req);
+    if (!instance->basicAuth(req)) return sendAuthFailure(req);
+    if (!instance->m_provisioningManager) {
+        return sendJsonError(req, "Provisioning manager unavailable", "503 Service Unavailable");
+    }
+    const uint32_t ttlSeconds = 600;
+    const std::string code = instance->m_provisioningManager->issueCode(ttlSeconds);
+    if (code.empty()) {
+        return sendJsonError(req, "Could not issue provisioning code", "500 Internal Server Error");
+    }
+    // The code is a secret; it is returned once and never logged. The TTL is
+    // included so the UI can display the expiry.
+    sendJsonStr(req, fmt::format("{{\"success\":true,\"code\":\"{}\",\"ttl_seconds\":{}}}",
+                                 code, ttlSeconds));
+    return ESP_OK;
+}
+
+esp_err_t WebServerManager::handleJoinHousehold(httpd_req_t *req) {
+    WebServerManager *instance = getInstance(req);
+    if (!instance->basicAuth(req)) return sendAuthFailure(req);
+    if (!instance->m_provisioningManager || !instance->m_householdManager ||
+        !instance->m_nodeIdentityManager) {
+        return sendJsonError(req, "Managers unavailable", "503 Service Unavailable");
+    }
+
+    char buf[4096];
+    const int received = httpd_req_recv(req, buf, sizeof(buf) - 1);
+    if (received <= 0) {
+        return sendJsonError(req, "Empty request body", "400 Bad Request");
+    }
+    buf[received] = '\0';
+    cJSON *root = cJSON_Parse(buf);
+    if (!root) {
+        return sendJsonError(req, "Invalid JSON", "400 Bad Request");
+    }
+    const cJSON *codeNode = cJSON_GetObjectItemCaseSensitive(root, "code");
+    const cJSON *idNode = cJSON_GetObjectItemCaseSensitive(root, "household_id");
+    const cJSON *nameNode = cJSON_GetObjectItemCaseSensitive(root, "household_name");
+    const bool ok = cJSON_IsString(codeNode) && cJSON_IsString(idNode);
+    if (!ok) {
+        cJSON_Delete(root);
+        return sendJsonError(req, "Missing 'code' or 'household_id'", "400 Bad Request");
+    }
+    const std::string code = codeNode->valuestring;
+    const std::string householdId = idNode->valuestring;
+    const std::string householdName = cJSON_IsString(nameNode) ? nameNode->valuestring : "Household";
+
+    std::vector<uint8_t> trustKey;
+    const cJSON *trustNode = cJSON_GetObjectItemCaseSensitive(root, "trust_key");
+    if (cJSON_IsString(trustNode)) {
+        trustKey = hexDecodeBytes(trustNode->valuestring);
+    }
+    const household::NodeRole role =
+        household::nodeRoleFromString(cJSON_IsString(cJSON_GetObjectItemCaseSensitive(root, "node_role"))
+                                          ? cJSON_GetObjectItemCaseSensitive(root, "node_role")->valuestring
+                                          : "other");
+    const std::string nodeName =
+        cJSON_IsString(cJSON_GetObjectItemCaseSensitive(root, "node_name"))
+            ? cJSON_GetObjectItemCaseSensitive(root, "node_name")->valuestring
+            : householdName;
+    cJSON_Delete(root);
+
+    if (!instance->m_provisioningManager->validateAndConsume(code)) {
+        return sendJsonError(req, "Invalid, expired or already-used provisioning code", "401 Unauthorized");
+    }
+
+    instance->m_householdManager->joinHousehold(householdId, householdName, trustKey);
+    instance->m_nodeIdentityManager->setRole(role);
+    instance->m_nodeIdentityManager->setHousehold(householdId);
+    instance->m_nodeIdentityManager->setState(household::NodeState::ACTIVE);
+    instance->m_householdManager->completeProvisioning();
+    if (instance->m_auditManager) {
+        instance->m_auditManager->record(AuditManager::NODE_ENROLLMENT, AuditManager::SOURCE_WEB,
+                                         AuditManager::RESULT_SUCCESS,
+                                         instance->m_nodeIdentityManager->info().node_id, householdId);
+    }
+    sendJsonStr(req, "{\"success\":true,\"message\":\"Node enrolled in household\"}");
+    return ESP_OK;
 }

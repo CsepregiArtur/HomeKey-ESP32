@@ -6,12 +6,12 @@
   let {
     actions,
     error,
-  }: { actions: ActionsConfig; error?: string | null } = $props();
+  }: { actions: ActionsConfig | null | undefined; error?: string | null } = $props();
 
   let activeTab = $state<'nfc' | 'state'>('nfc');
 
   // svelte-ignore state_referenced_locally
-  let actionsConfig = $state<ActionsConfig>($state.snapshot(actions));
+  let actionsConfig = $state<ActionsConfig>($state.snapshot(actions ?? ({} as ActionsConfig)));
 
   const saveActionsConfig = async (e: any): Promise<void> => {
     try {

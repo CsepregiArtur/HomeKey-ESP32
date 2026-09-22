@@ -157,3 +157,38 @@ See [Breaking changes]({{< ref "updates" >}}) for the update order.
 ## Reporting a vulnerability
 
 Please open a private report (GitHub Security Advisory) rather than a public issue, and include the firmware version, the affected endpoint or component, and a reproduction. Fixes for anything in the [threat model](#threat-model) that can be reached over the network are handled as security releases.
+
+## Household cryptography (multi-node)
+
+The Household extension uses only established primitives from the already-linked
+libsodium (`espressif/libsodium`) and mbedTLS. No custom algorithms are used.
+
+| Purpose | Construction |
+|---|---|
+| Node identity keypair | Ed25519 (`crypto_sign_keypair`); private key stored in NVS, never serialized/exported |
+| Node certificate fingerprint | SHA-256(`node_id || public_key`) — placeholder until a household CA exists |
+| Backup key derivation | `BLAKE2b-256("HK-HOUSEHOLD-BACKUP-v1", recovery_secret || salt)` (`crypto_generichash`, keyed) |
+| Backup encryption | XChaCha20-Poly1305-IETF AEAD (`crypto_aead_xchacha20poly1305_ietf_*`); 24-byte random nonce; header bound as additional data |
+| Backup authentication | Ed25519 detached signature over `header || ciphertext` (`crypto_sign_verify_detached`) |
+| Provisioning token at rest | SHA-256 of the code only (never the code); comparison via `sodium_memcmp` |
+| MQTT command authentication | HMAC-SHA256 (`crypto_auth_hmacsha256`) over `{ts}{nonce}{req_id}{action}`; key = `BLAKE2b-256("HK-HOUSEHOLD-CMD-v1", recovery_secret || salt)` |
+| Constant-time comparisons | `sodium_memcmp` for provisioning hash and command MAC |
+
+Key hygiene:
+
+- Nonces for every backup are 24 random bytes (`randombytes_buf`), so reuse is
+  cryptographically negligible.
+- The recovery secret, node private key and derived keys are zeroized with
+  `sodium_memzero` on destruction.
+- Secret material is never written to the Web UI, MQTT telemetry or logs; the
+  recovery secret is exportable exactly once.
+
+Known limitations (kept explicit, not hidden):
+
+- The node "certificate" is currently a fingerprint, not a CA-signed leaf; there
+  is no household CA yet.
+- MQTT commands rely on a shared household command key derived from the recovery
+  secret rather than per-node signed commands.
+- Flash encryption and secure boot remain off by design (see
+  [Physical access](#physical-access-is-a-total-compromise)).
+

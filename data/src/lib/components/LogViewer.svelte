@@ -37,7 +37,7 @@
   });
 
   let currentTime = $state(new Date());
-  let timeUpdateInterval = $state<NodeJS.Timeout>();
+  let timeUpdateInterval = $state<ReturnType<typeof setInterval>>();
 
   let sys_log_level = $derived(() => String(systemInfo.log_level));
   let backLogMaxSize = $derived(() => String(systemInfo.backlog_max_size));
