@@ -1,4 +1,4 @@
-baseURL: https://rednblkx.github.io/HomeKey-ESP32
+baseURL: https://csepregiartur.github.io/HomeKey-ESP32
 languageCode: en-us
 title: HomeKey-ESP32 Wiki
 enableRobotsTXT: true
@@ -11,15 +11,21 @@ module:
 menu:
   main:
     - identifier: github
-      name: GitHub
-      url: "https://github.com/rednblkx/HomeKey-ESP32"
+      name: GitHub (this fork)
+      url: "https://github.com/CsepregiArtur/HomeKey-ESP32"
       weight: 1
+      params:
+        icon: github
+    - identifier: upstream
+      name: Upstream project
+      url: "https://github.com/rednblkx/HomeKey-ESP32"
+      weight: 2
       params:
         icon: github
     - identifier: discord
       name: Discord
       url: "https://discord.com/invite/VWpZ5YyUcm"
-      weight: 2
+      weight: 3
       params:
         icon: discord
     - name: Search
@@ -38,14 +44,15 @@ params:
     - name: main
       url: /
     - name: v0.10.0
-      url: https://rednblkx.github.io/HomeKey-ESP32/v0.10.0/
-    - name: v0.9.0
+      url: https://csepregiartur.github.io/HomeKey-ESP32/v0.10.0/
+    # Older releases are only published by the upstream project.
+    - name: upstream v0.9.0
       url: https://rednblkx.github.io/HomeKey-ESP32/v0.9.0/
-    - name: v0.8
+    - name: upstream v0.8
       url: https://rednblkx.github.io/HomeKey-ESP32/v0.8/
-    - name: v0.7.1
+    - name: upstream v0.7.1
       url: https://rednblkx.github.io/HomeKey-ESP32/v0.7.1/
-    - name: v0.7
+    - name: upstream v0.7
       url: https://rednblkx.github.io/HomeKey-ESP32/v0.7/
 
   navbar:
