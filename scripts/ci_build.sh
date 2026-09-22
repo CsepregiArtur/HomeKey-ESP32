@@ -14,8 +14,9 @@
 #     of your real key (see docs/content/security.md).
 #
 # Runs inside the espressif/esp-idf-ci-action container, where espsecure.py is
-# already available.
-set -euo pipefail
+# already available. Note that the action may invoke this file with `sh` rather
+# than bash, so it must stay POSIX-compatible: no `pipefail`, no `[[ ]]`.
+set -eu
 
 KEY_PATH="keys/secure_boot_signing_key.pem"
 
