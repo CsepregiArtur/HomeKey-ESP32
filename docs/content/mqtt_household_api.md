@@ -5,6 +5,11 @@ weight: 7
 
 # MQTT Household API
 
+> [!NOTE]
+> **Fork-only API.** Upstream exposes only the flat, single-device topics documented
+> in [MQTT](mqtt). Everything on this page is **additive** and specific to this fork;
+> upstream firmware does not implement it. See [Fork vs Upstream](fork-vs-upstream).
+
 Reference for the structured, multi-node MQTT namespace introduced by the
 Household architecture. Legacy single-device topics (prefixed by the MQTT client
 id) are unchanged and documented in [MQTT](mqtt).

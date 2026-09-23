@@ -5,6 +5,13 @@ weight: 3
 
 # Making HomeKey-ESP32 Yours (via the Web Interface)
 
+> [!NOTE]
+> **Fork differences in the Web UI.** Upstream ships the Misc, MQTT, OTA, Logs and
+> Actions pages. This fork **adds** *household*, *node*, *health*, *security*,
+> *audit*, *backup*, *recovery* and *provision*, and changes the default security
+> posture (flash encryption on). The existing pages are unchanged. See
+> [Fork vs Upstream](fork-vs-upstream).
+
 Welcome to the control center of your HomeKey-ESP32! This guide will walk you through all the settings you can tweak to make your device work exactly how you want it to. All these configurations are easily managed through the device's intuitive web interface.
 
 > [!CAUTION]

@@ -5,6 +5,13 @@ weight: 9
 
 HomeKey-ESP32 controls a door lock, so it is worth being explicit about what it protects, what it does not, and how to deploy it safely. This page is the reference for that: threat model, the hardening that ships with the firmware, and the decisions that are deliberately left to you.
 
+> [!IMPORTANT]
+> **The security model differs from upstream.** [rednblkx/HomeKey-ESP32](https://github.com/rednblkx/HomeKey-ESP32)
+> deliberately ships with **flash encryption and Secure Boot disabled** so existing
+> users never have to re-provision. **This fork enables flash encryption, Secure
+> Boot V1 and NVS encryption**, which changes the physical-access threat model and
+> makes a serial re-flash mandatory. See [Fork vs Upstream](fork-vs-upstream#4-security-model--the-biggest-difference).
+
 ## Threat model
 
 | Attacker has... | Can they get in? | Notes |

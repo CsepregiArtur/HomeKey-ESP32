@@ -54,6 +54,15 @@ updating.
   HomeKey credentials must be re-provisioned in the Apple Home app — this cannot be
   automated.
 
+### Documentation
+
+* **New page: [Fork vs Upstream](docs/content/fork-vs-upstream.md)** — the complete,
+  side-by-side comparison of this fork against
+  [rednblkx/HomeKey-ESP32](https://github.com/rednblkx/HomeKey-ESP32), including what
+  changed (household, MQTT contract, flash encryption / Secure Boot / NVS encryption)
+  and what is unchanged. Also summarised in the README and the wiki home page, and
+  cross-linked from every affected page.
+
 ## 0.9.0 - 2026-09-17
 
 Security-focused release: it changes some defaults, so read the *Breaking* section below

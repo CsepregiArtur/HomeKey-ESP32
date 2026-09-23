@@ -35,6 +35,35 @@
 > [`docs/content/mqtt_household_api.md`](docs/content/mqtt_household_api.md) and
 > [`docs/content/mqtt_api_contract_matrix.md`](docs/content/mqtt_api_contract_matrix.md).
 
+## This fork vs. the original project
+
+This repository is a **fork of [rednblkx/HomeKey-ESP32](https://github.com/rednblkx/HomeKey-ESP32)**.
+Upstream is the original project and is where the core HomeKey / HomeKit / NFC work
+lives. This table is the complete summary of what differs; the full explanation is
+in [`docs/content/fork-vs-upstream.md`](docs/content/fork-vs-upstream.md).
+
+| Area | Original project (`0.9.0`) | This fork (`0.10.0`) |
+| --- | --- | --- |
+| Scope | Single device | **Household** of multiple nodes |
+| Node identity | — | Ed25519 keypair per node, never cloned |
+| Backup | — | **Encrypted** (XChaCha20-Poly1305) + **signed** (Ed25519) |
+| Provisioning | — | Single-use, expiring, replay-protected join codes |
+| MQTT | Single-device legacy topics | **Additive** household namespace + HA discovery |
+| MQTT lock/unlock | Plain numeric payloads | **HMAC-SHA256 authenticated** commands |
+| Web UI | Misc, MQTT, OTA, Logs, Actions | **+ household, node, health, security, audit, backup, recovery, provision** |
+| Audit log | — | Bounded 256-record log |
+| **Flash encryption** | **Disabled** (deliberate) | **Enabled** |
+| **Secure Boot** | **Disabled** | **Enabled** (V1, ECDSA-P256) |
+| **NVS encryption** | **Disabled** | **Enabled** (`nvs_keys` partition) |
+| Partition table | `0x8000`, no `nvs_keys` | **`0xD000`, with `nvs_keys`** |
+
+**Unchanged from upstream:** the HomeKey/NFC protocol, `LockManager` lock logic,
+the HomeSpan/HomeKit accessory model, the existing Web UI pages, and all existing
+MQTT topic names and payloads (the household namespace is additive).
+
+**Consequences of the security differences** (see the caution below): OTA from an
+older build will not boot and existing device data is erased on first flash.
+
 ## What is HomeKey-ESP32?
 
 The project aims to be the easy DIY solution for using Apple's HomeKey feature without the need to purchase a compatible smart lock that you probably don't want. HomeKey-ESP32 brings Apple's secure NFC-based unlocking to an ESP32 module near you, enabling you to unlock doors and whatnot with a simple tap of your iPhone or Apple Watch.
@@ -44,6 +73,9 @@ The project aims to be the easy DIY solution for using Apple's HomeKey feature w
 > [!CAUTION]
 > **Flash encryption, Secure Boot V1 and NVS encryption are enabled in this fork.
 > This is irreversible and destroys existing device data.**
+>
+> The original project deliberately leaves the flash unencrypted so existing users
+> never have to re-provision. This fork accepts that migration cost instead.
 >
 > These protections burn one-time eFuses and encrypt the flash on first boot:
 >

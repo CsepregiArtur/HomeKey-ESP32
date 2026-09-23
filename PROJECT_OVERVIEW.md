@@ -9,6 +9,23 @@
 
 ## 1. What it is
 
+> [!IMPORTANT]
+> **Fork vs upstream — at a glance.** See [Fork vs Upstream](docs/content/fork-vs-upstream.md)
+> for the full comparison.
+>
+> | Area | Upstream `0.9.0` | This fork `0.10.0` |
+> | --- | --- | --- |
+> | Scope | Single device | **Household** of multiple nodes |
+> | Backup / provisioning | — | Encrypted+signed backup; one-time join codes |
+> | MQTT | Legacy topics | **+ household namespace**, HA discovery, HMAC commands |
+> | Web UI | Misc/MQTT/OTA/Logs | **+ household, node, health, security, audit, backup, recovery, provision** |
+> | Flash encryption | **Disabled** | **Enabled** |
+> | Secure Boot | **Disabled** | **Enabled** (V1, ECDSA-P256) |
+> | NVS encryption | **Disabled** | **Enabled** |
+>
+> **Unchanged from upstream:** HomeKey/NFC protocol, lock logic, HomeKit accessory
+> model, existing Web UI pages and all existing MQTT topics.
+
 **HomeKey-ESP32** is an open-source DIY firmware (MIT-licensed) that brings **Apple HomeKey** — the NFC-based "tap your iPhone/Apple Watch to unlock" feature — to ordinary ESP32 hardware. Instead of buying a HomeKey-certified smart lock, you wire an NFC reader to an ESP32, flash this firmware, and the device becomes a HomeKey reader plus a full smart-home lock accessory.
 
 - **Version:** `0.10.0` (household multi-node release, 2026-09-22)

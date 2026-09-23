@@ -15,6 +15,13 @@ This report is the inspection deliverable required before implementing the multi
 "HomeKey Household" architecture. It documents what exists today, what must be
 preserved, and how the new modules map onto the current codebase.
 
+> [!IMPORTANT]
+> **Fork vs upstream.** Sections describing *existing* behaviour are upstream
+> `0.9.0`; sections describing household, backup, provisioning, security posture
+> and the MQTT household namespace are **new in this fork**. See
+> [Fork vs Upstream](docs/content/fork-vs-upstream.md) for the comparison table and
+> [Security](docs/content/security.md) for the flash-encryption / Secure Boot change.
+
 ## 1. Current architecture (verified in source)
 
 ### 1.1 Build & framework

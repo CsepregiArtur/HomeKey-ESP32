@@ -5,6 +5,11 @@ weight: 8
 
 # MQTT API Contract Matrix
 
+> [!NOTE]
+> **Fork-only document.** This contract describes the household MQTT API added by
+> this fork. Upstream's MQTT surface is the smaller legacy topic set; nothing here
+> exists upstream. See [Fork vs Upstream](fork-vs-upstream).
+
 Formal interface contract between **HomeKey-ESP32 0.10.0** and
 **HomeKey Household — Home Assistant V2**. This document is the result of a
 read-only audit of the actual firmware implementation (`main/MqttManager.cpp`,

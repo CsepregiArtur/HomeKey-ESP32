@@ -5,6 +5,12 @@ weight: 5
 
 # Keeping Your HomeKey-ESP32 Fresh!
 
+> [!IMPORTANT]
+> **This fork cannot be updated over the air from upstream firmware.** The partition
+> layout changed and Secure Boot is enabled, so an OTA from an older/upstream build
+> will not boot — a serial flash is required. See [Fork vs Upstream](fork-vs-upstream)
+> and the breaking-change section below.
+
 This document outlines different methods for updating the firmware on your HomeKey-ESP32 device. Keeping your device up-to-date ensures you have the latest features, bug fixes, and security enhancements.
 
 > [!NOTE]

@@ -5,6 +5,12 @@ weight: 5
 
 # Household & Node Architecture
 
+> [!NOTE]
+> **Fork-only feature.** Upstream [rednblkx/HomeKey-ESP32](https://github.com/rednblkx/HomeKey-ESP32)
+> has **no** household, node identity, backup or recovery concept — there a device is
+> standalone. This entire page describes behaviour that exists **only in this fork**.
+> See [Fork vs Upstream](fork-vs-upstream).
+
 HomeKey-ESP32 can run as a single device or as part of a **Household**: a group of
 nodes (gate, main house, small house, garage, workshop) that share trust and recovery
 material while each node keeps its own device-specific identity.
