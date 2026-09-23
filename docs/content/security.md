@@ -98,7 +98,28 @@ Generate the key **once** and never lose it - the same key has to sign every fut
 espsecure.py generate_signing_key --version 1 keys/secure_boot_signing_key.pem
 ```
 
-`keys/` and `*.pem` are gitignored; **never commit the private key.**
+`keys/` and `*.pem` are gitignored; **never commit the private key.** Back it up
+somewhere safe (password manager, encrypted volume) - it exists nowhere else.
+
+### Which key signed a given build?
+
+Every CI build logs a **public-key fingerprint**, so you can tell which key was
+used without ever exposing the private one:
+
+```bash
+openssl pkey -in keys/secure_boot_signing_key.pem -pubout | openssl dgst -sha256
+```
+
+In the build log, look for one of exactly two mutually exclusive messages:
+
+| Log message | Meaning |
+| --- | --- |
+| `SIGNED WITH YOUR KEY - using the provided keys/secure_boot_signing_key.pem` | The real key from the `SECURE_BOOT_SIGNING_KEY` secret was used. The build is flashable. |
+| `THROWAWAY SIGNING KEY ... only boots on a device with unburned eFuses` | `SECURE_BOOT_SIGNING_KEY` is not set. **Do not publish this build.** |
+
+The workflow prints the whole script before running it, so the *unused* branch's
+text also appears in the log. Trust the `::notice`/`::warning` annotations (they
+are prefixed and only one of them can be emitted at runtime) and the fingerprint.
 
 ## Flash encryption, Secure Boot and NVS encryption
 

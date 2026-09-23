@@ -189,15 +189,15 @@ jobs:
         env:
           SECURE_BOOT_SIGNING_KEY: ${{ secrets.SECURE_BOOT_SIGNING_KEY }}
         run: |
-          # `scripts/ci_build.sh` generates an ephemeral key when this file is
-          # absent; write the real key here when the secret is configured so CI
-          # produces flashable images.
+          # Materials the real Secure Boot key from the repository secret so CI
+          # produces flashable images. `scripts/ci_build.sh` only falls back to a
+          # throwaway key when this file is missing.
           mkdir -p keys
           if [ -n "${SECURE_BOOT_SIGNING_KEY}" ]; then
             printf '%s' "${SECURE_BOOT_SIGNING_KEY}" | base64 -d > keys/secure_boot_signing_key.pem
-            echo "Secure Boot signing key installed from the SECURE_BOOT_SIGNING_KEY secret."
+            echo "::notice title=Secure Boot::SIGNED WITH YOUR KEY - the real secure_boot_signing_key.pem was installed from the SECURE_BOOT_SIGNING_KEY secret."
           else
-            echo "::notice title=Ephemeral signing key::SECURE_BOOT_SIGNING_KEY is not set; CI will build with a throwaway key that only boots on a device with unburned eFuses."
+            echo "::warning title=THROWAWAY SIGNING KEY::SECURE_BOOT_SIGNING_KEY is not set, so this build is signed with a throwaway key that only boots on a device with unburned eFuses. Set the secret to publish flashable images."
           fi
       - uses: actions/cache@v5
         with:
