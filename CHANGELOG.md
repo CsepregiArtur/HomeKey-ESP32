@@ -7,6 +7,12 @@ Notable changes per release. User-facing detail lives in the docs:
 
 ### Added
 
+* **Restore a backup from the Web UI.** **Recovery → Restore from a backup** takes the backup
+  file (or pasted hex) and the offline recovery secret and restores household membership and
+  configuration onto a replacement node. The endpoint already existed but had no interface, so
+  a "one push restore" was really two API calls. The form states what it needs and what it
+  refuses: the recovery secret, and a device that does not already have its own identity
+  (restore mints a replacement one, and identities are never cloned).
 * **Update from GitHub.** The OTA page can now download and install a published release
   directly: pick **Production** or **Development**, check what the channel points at, then
   install. The device performs the GitHub API call and the download itself (TLS verified
@@ -84,6 +90,17 @@ Notable changes per release. User-facing detail lives in the docs:
   no answer. SNTP now starts when the station interface comes up, and the boot log reports
   the first successful sync. Verified on the device: it reports an epoch within a second of
   the host clock.
+* **User-typed names could break any document carrying them.** `node_name`, `household_name`
+  and the audit metadata were interpolated into JSON with `fmt::format`, so a single quote in
+  a device or household name made the whole document unparseable - the `state` topic,
+  `/household`, `/node` and `/audit` - and took every field after the name with it, not just
+  the name. All of them now go through one `jsonEscape()` helper, and `BackupManager`'s private
+  copy of that helper was replaced by the shared one.
+* **"Backup completed" could be read as "backup stored".** Nothing keeps a copy - the device
+  records only the time and hash - so the Backup page now says so plainly, makes **Download**
+  the primary action rather than a secondary one, and warns before the page is closed with a
+  backup that was never saved. The `backup/status: completed` topic means *produced*, not
+  *saved*, because it is retained and goes on saying so either way.
 
 ### Known issues
 

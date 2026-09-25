@@ -1,6 +1,7 @@
 #include "fmt/ranges.h"
 #include "config.hpp"
 #include "MqttManager.hpp"
+#include "json_escape.hpp"
 #include "LockManager.hpp"
 #include "ConfigManager.hpp"
 #include "JsonGuard.hpp"
@@ -861,11 +862,15 @@ void MqttManager::publishNodeStatus() {
     const auto &hh = m_household->info();
     const auto &nd = m_node->info();
 
+    // The household id, node id and node name are all things a user typed, so they are
+    // escaped: one quote in any of them would make the document unparseable and take every
+    // field after it - the node's state included - with it.
     std::string state = fmt::format(
         "{{\"household_id\":\"{}\",\"node_id\":\"{}\",\"node_name\":\"{}\",\"node_role\":\"{}\","
         "\"node_state\":\"{}\",\"generation\":{},\"firmware_version\":\"{}\"}}",
-        hh.household_id, nd.node_id, nd.node_name, household::nodeRoleToString(nd.node_role),
-        household::nodeStateToString(nd.state), nd.generation, esp_app_get_description()->version);
+        jsonEscape(hh.household_id), jsonEscape(nd.node_id), jsonEscape(nd.node_name),
+        household::nodeRoleToString(nd.node_role), household::nodeStateToString(nd.state),
+        nd.generation, jsonEscape(esp_app_get_description()->version));
     publish(base + "/state", state, 0, true);
     publish(base + "/status", "online", 1, true);
 

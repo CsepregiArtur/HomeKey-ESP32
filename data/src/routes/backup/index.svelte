@@ -5,6 +5,7 @@
 	let error = $state('');
 	let creating = $state(false);
 	let backupHex = $state('');
+	let downloaded = $state(false);
 
 	async function loadStatus() {
 		try {
@@ -40,7 +41,18 @@
 		a.download = `homekey-backup-${Date.now()}.hex`;
 		a.click();
 		URL.revokeObjectURL(a.href);
+		downloaded = true;
 	}
+
+	// The device keeps only the time and hash of the last backup, so an unsaved one is lost
+	// the moment this page goes away. Asking before that happens is the last chance to say so.
+	$effect(() => {
+		const guard = (event: BeforeUnloadEvent) => {
+			if (backupHex && !downloaded) event.preventDefault();
+		};
+		window.addEventListener('beforeunload', guard);
+		return () => window.removeEventListener('beforeunload', guard);
+	});
 
 	onMount(loadStatus);
 </script>
@@ -70,14 +82,23 @@
 			{creating ? 'Creating…' : 'Create encrypted backup'}
 		</button>
 		{#if backupHex}
-			<button class="btn btn-outline" onclick={download}>Download</button>
+			<button class="btn btn-primary" onclick={download}>Download it now</button>
 		{/if}
+	</div>
+
+	<!-- "Completed" on the node and in Home Assistant means a backup was produced, not that one
+	     is stored anywhere: nothing keeps a copy, and the status topic stays "completed"
+	     afterwards whether or not anyone saved the file. -->
+	<div class="alert alert-warning mt-4">
+		<span>The device keeps <strong>no copy</strong>. It records only the time and hash of the
+			last backup, so this is the one opportunity to save it — leave this page without
+			downloading and the backup is gone, and a new one has to be made.</span>
 	</div>
 
 	{#if backupHex}
 		<div class="card bg-base-200 mt-4">
 			<div class="card-body">
-				<p class="text-sm opacity-70 mb-1">Encrypted backup (hex) — store it off-device:</p>
+				<p class="text-sm opacity-70 mb-1">Encrypted backup (hex) — this is the only copy:</p>
 				<textarea readonly rows={6} class="textarea textarea-bordered text-xs font-mono">{backupHex}</textarea>
 			</div>
 		</div>

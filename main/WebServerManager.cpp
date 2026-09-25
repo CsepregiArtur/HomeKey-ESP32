@@ -67,6 +67,7 @@
 #include <string>
 #include <vector>
 #include "JsonGuard.hpp"
+#include "json_escape.hpp"
 
 // ============================================================================
 // Constants
@@ -3668,9 +3669,9 @@ esp_err_t WebServerManager::handleGetHousehold(httpd_req_t *req) {
         "{{\"household_id\":\"{}\",\"household_name\":\"{}\",\"state\":\"{}\",\"config_version\":{},"
         "\"trust_key\":\"{}\",\"recovery_metadata\":\"{}\",\"recovery_salt\":\"{}\","
         "\"has_recovery_secret\":{},\"recovery_exported\":{}}}",
-        hh.household_id, hh.household_name, household::householdStateToString(hh.state),
-        hh.config_version, hexEncodeBytes(hh.trust_public_key),
-        hexEncodeBytes(hh.recovery_metadata),
+        jsonEscape(hh.household_id), jsonEscape(hh.household_name),
+        household::householdStateToString(hh.state), hh.config_version,
+        hexEncodeBytes(hh.trust_public_key), hexEncodeBytes(hh.recovery_metadata),
         hexEncodeBytes(instance->m_householdManager->recoverySalt()),
         hh.has_recovery_secret ? "true" : "false",
         hh.recovery_exported ? "true" : "false"));
@@ -3690,9 +3691,10 @@ esp_err_t WebServerManager::handleGetNode(httpd_req_t *req) {
         "{{\"node_id\":\"{}\",\"node_name\":\"{}\",\"node_role\":\"{}\",\"node_state\":\"{}\","
         "\"household_id\":\"{}\",\"generation\":{},\"public_key\":\"{}\","
         "\"cert_fingerprint\":\"{}\"}}",
-        nd.node_id, nd.node_name, household::nodeRoleToString(nd.node_role),
-        household::nodeStateToString(nd.state), nd.household_id, nd.generation,
-        hexEncodeBytes(nd.public_key), hexEncodeBytes(nd.cert_fingerprint)));
+        jsonEscape(nd.node_id), jsonEscape(nd.node_name),
+        household::nodeRoleToString(nd.node_role), household::nodeStateToString(nd.state),
+        jsonEscape(nd.household_id), nd.generation, hexEncodeBytes(nd.public_key),
+        hexEncodeBytes(nd.cert_fingerprint)));
     return ESP_OK;
 }
 

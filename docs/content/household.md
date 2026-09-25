@@ -125,6 +125,24 @@ clone. Restoring a node is deliberately split into three separate operations:
    (re-issued by Apple Home), which invalidates all previously enrolled HomeKey
    devices. Those devices must be re-provisioned in the Apple Home app.
 
+### What "backup completed" means, and where the backup is
+
+The device does **not** store backups. `POST /backup/create` (Web UI **Backup → Create**)
+returns the encrypted blob in the response, and the device records only the *time* and *hash*
+of the last one. So `backup/status: completed` means *a backup was produced*, not *a backup is
+saved* — and because that status is retained, it goes on saying "completed" afterwards whether
+or not anybody kept the file. If it was not downloaded, it is gone and a new one has to be
+made.
+
+The blob itself is the only thing that can be restored, together with the offline recovery
+secret: the backup is encrypted and signed under a key derived from that secret, so nothing
+can be recovered without it.
+
+Restore is in the Web UI at **Recovery → Restore from a backup**, or
+`POST /backup/restore` with `{secret, backup}` (both hex). A device that already has its own
+node identity **refuses**: restore mints a *replacement* identity and an identity is never
+cloned onto a second unit, so this belongs on the replacement device.
+
 > [!WARNING]
 > Replacing the NFC/HomeKey reader means existing HomeKey credentials stop
 > working. Re-add them in the Apple Home app after the replacement. This is a

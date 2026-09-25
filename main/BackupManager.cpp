@@ -1,4 +1,5 @@
 #include "BackupManager.hpp"
+#include "json_escape.hpp"
 #include "AuditManager.hpp"
 #include "ConfigManager.hpp"
 #include "HouseholdManager.hpp"
@@ -50,27 +51,6 @@ std::string hexEncode(const std::vector<uint8_t> &bytes) {
     for (uint8_t b : bytes) {
         out.push_back(digits[b >> 4]);
         out.push_back(digits[b & 0x0F]);
-    }
-    return out;
-}
-
-std::string jsonEscape(const std::string &in) {
-    std::string out;
-    out.reserve(in.size() + 8);
-    for (char c : in) {
-        switch (c) {
-            case '"': out += "\\\""; break;
-            case '\\': out += "\\\\"; break;
-            case '\n': out += "\\n"; break;
-            case '\r': out += "\\r"; break;
-            case '\t': out += "\\t"; break;
-            default:
-                if (static_cast<unsigned char>(c) < 0x20) {
-                    out += fmt::format("\\u{:04x}", static_cast<unsigned char>(c));
-                } else {
-                    out += c;
-                }
-        }
     }
     return out;
 }

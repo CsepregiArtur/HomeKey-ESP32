@@ -1,4 +1,5 @@
 #include "AuditManager.hpp"
+#include "json_escape.hpp"
 #include "app_event_loop.hpp"
 #include "eventStructs.hpp"
 #include <algorithm>
@@ -174,8 +175,8 @@ std::string AuditManager::toJson(size_t maxEntries) const {
             "{{\"seq\":{},\"timestamp\":{},\"event\":\"{}\",\"source\":\"{}\",\"result\":\"{}\","
             "\"node_id\":\"{}\",\"metadata\":\"{}\"}}{}",
             v.seq, v.timestamp, eventTypeName(v.event_type), sourceName(v.source),
-            v.result == RESULT_SUCCESS ? "success" : "failure", v.node_id, v.metadata,
-            i + 1 < count ? "," : "");
+            v.result == RESULT_SUCCESS ? "success" : "failure", jsonEscape(v.node_id),
+            jsonEscape(v.metadata), i + 1 < count ? "," : "");
     }
     return fmt::format("{{\"total\":{},\"records\":[{}]}}", recs.size(), body);
 }
