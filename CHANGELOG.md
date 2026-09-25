@@ -5,6 +5,27 @@ Notable changes per release. User-facing detail lives in the docs:
 
 ## Unreleased
 
+### Added
+
+* **Update from GitHub.** The OTA page can now download and install a published release
+  directly: pick **Production** or **Development**, check what the channel points at, then
+  install. The device performs the GitHub API call and the download itself (TLS verified
+  against the bundled CA roots), so the browser needs no token and no route to the
+  internet. Firmware and filesystem are installed together, because the web UI lives in
+  the filesystem image.
+  * Production uses `/releases/latest`, which GitHub defines as the newest release that is
+    neither a draft nor a pre-release.
+  * Development uses the newest entry of `/releases`, because `/releases/latest` silently
+    skips pre-releases - so a dev channel cannot be built on it.
+  * The manual `.bin` upload stays available below the new card, for flashing a local
+    build when GitHub is unreachable.
+  * **Not signature-checked.** With the security features still in Path 1 there is no
+    Secure Boot, so an image is only validated as a well-formed ESP image over a verified
+    TLS connection. See [PATH2 rollout](docs/content/PATH2_SECURITY_ROLLOUT.md).
+* **Development builds report a usable version.** A build from the `dev` tag previously
+  reported only a bare commit hash; it now reports `<version>-dev+<hash>`, matching every
+  other untagged build.
+
 ### Changed
 
 * **First-run setup replaces automatic credential generation.** A factory-fresh device keeps

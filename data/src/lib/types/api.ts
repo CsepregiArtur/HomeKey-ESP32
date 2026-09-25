@@ -129,8 +129,7 @@ export interface CaptivePortalConfig {
 
 export interface WiFiNetwork {
   /** Network SSID */
-  ssid: string;
-  /** Signal strength in dBm */
+  ssid: string;  /** Signal strength in dBm */
   rssi: number;
   /** WiFi channel */
   channel: number;

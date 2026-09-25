@@ -2,6 +2,12 @@
 	import { onDestroy, onMount } from "svelte";
 	import ws, { type WebSocketEvent } from "$lib/services/ws.js";
 	import type { ApiResponse, Either, OTAStatus } from "$lib/types/api";
+	import {
+		getReleaseInfo,
+		installRelease,
+		type ReleaseChannel,
+		type ReleaseInfo
+	} from "$lib/services/api";
 	import { type WebSocketState } from "$lib/stores/websocket.svelte";
 	import { systemInfo } from "$lib/stores/system.svelte";
 	import { getChipModelString } from "$lib/utils/chipModel";
@@ -33,6 +39,54 @@
 	let littlefsInput = $state<HTMLInputElement | null>(null);
 
 	let lastLoggedPercent = $state(0);
+
+	// --- Update from GitHub -------------------------------------------------
+	// The device performs the GitHub API call and the download itself, so the browser
+	// needs no token and no route to the internet.
+	let releaseChannel = $state<ReleaseChannel>("stable");
+	let releaseInfo = $state<ReleaseInfo | null>(null);
+	let releaseError = $state<string | null>(null);
+	let checkingRelease = $state(false);
+	let installingRelease = $state(false);
+
+	function selectChannel(channel: ReleaseChannel) {
+		releaseChannel = channel;
+		releaseInfo = null;
+		releaseError = null;
+	}
+
+	async function checkForRelease() {
+		checkingRelease = true;
+		releaseError = null;
+		releaseInfo = null;
+		try {
+			const result = await getReleaseInfo(releaseChannel);
+			if (result.success && "data" in result && result.data) {
+				releaseInfo = result.data;
+				addLog("info", `${result.data.channel} channel is at ${result.data.tag}`);
+			} else {
+				releaseError =
+					("error" in result && result.error) || "Could not check for updates";
+				addLog("error", `Update check failed: ${releaseError}`);
+			}
+		} finally {
+			checkingRelease = false;
+		}
+	}
+
+	async function installFromGitHub() {
+		if (!releaseInfo) return;
+		installingRelease = true;
+		releaseError = null;
+		// Progress arrives over the OTA WebSocket stream; the device reboots when done.
+		const result = await installRelease(releaseChannel);
+		if (result.success) {
+			addLog("info", `Installing ${releaseInfo.tag}. The device reboots when it finishes.`);
+		} else {
+			releaseError = ("error" in result && result.error) || "Could not start the update";
+			installingRelease = false;
+		}
+	}
 
 	let progressPercent = $derived(otaStatus.progress_percent || 0);
 	let currentBytes = $derived(otaStatus.bytes_written || 0);
@@ -426,6 +480,119 @@
 					</div>
 				</div>
 			</div>
+		</div>
+	</div>
+
+	<!-- Update from GitHub -->
+	<div class="card bg-base-200 mt-6">
+		<div class="card-body">
+			<div class="flex items-center gap-2">
+				<div class="w-10 h-10 rounded-lg bg-primary/20 flex items-center justify-center">
+					<svg
+						viewBox="0 0 24 24"
+						xmlns="http://www.w3.org/2000/svg"
+						width="24"
+						height="24"
+						fill="currentColor"
+						class="size-6 text-primary"
+					>
+						<path
+							d="M12 3a9 9 0 0 0-2.85 17.54c.45.08.62-.2.62-.44v-1.7c-2.5.55-3.03-1.06-3.03-1.06-.41-1.04-1-1.32-1-1.32-.82-.56.06-.55.06-.55.9.07 1.38.93 1.38.93.8 1.38 2.11.98 2.62.75.08-.58.31-.98.57-1.2-2-.23-4.1-1-4.1-4.46 0-.99.35-1.8.93-2.43-.09-.23-.4-1.15.09-2.4 0 0 .76-.24 2.48.93a8.6 8.6 0 0 1 4.52 0c1.72-1.17 2.48-.93 2.48-.93.49 1.25.18 2.17.09 2.4.58.63.93 1.44.93 2.43 0 3.47-2.11 4.23-4.12 4.45.32.28.61.84.61 1.69v2.5c0 .25.16.53.62.44A9 9 0 0 0 12 3Z"
+						/>
+					</svg>
+				</div>
+				<div>
+					<h2 class="card-title text-base">Update from GitHub</h2>
+					<p class="text-xs text-base-content/60">
+						Downloads a published release and installs the firmware and filesystem for you.
+					</p>
+				</div>
+			</div>
+
+			<div class="flex flex-wrap items-end gap-3 mt-3">
+				<div class="form-control">
+					<span class="label-text text-xs">Channel</span>
+					<div class="join mt-1">
+						<button
+							type="button"
+							class="btn btn-sm join-item"
+							class:btn-active={releaseChannel === "stable"}
+							onclick={() => selectChannel("stable")}
+						>
+							Production
+						</button>
+						<button
+							type="button"
+							class="btn btn-sm join-item"
+							class:btn-active={releaseChannel === "dev"}
+							onclick={() => selectChannel("dev")}
+						>
+							Development
+						</button>
+					</div>
+				</div>
+				<button
+					type="button"
+					class="btn btn-sm btn-outline"
+					onclick={checkForRelease}
+					disabled={checkingRelease || otaStatus.in_progress || isDisabled}
+				>
+					{#if checkingRelease}
+						<span class="loading loading-spinner loading-xs"></span>
+					{/if}
+					Check for updates
+				</button>
+			</div>
+
+			{#if releaseError}
+				<div class="alert alert-error py-2 px-3 mt-3">
+					<span class="text-xs">{releaseError}</span>
+				</div>
+			{/if}
+
+			{#if releaseInfo}
+				<div class="mt-3 rounded-lg bg-base-100 p-3 text-xs space-y-1">
+					<div class="flex justify-between gap-4">
+						<span class="text-base-content/60">Running</span>
+						<span class="font-mono">{releaseInfo.current_version}</span>
+					</div>
+					<div class="flex justify-between gap-4">
+						<span class="text-base-content/60">Available</span>
+						<span class="font-mono">
+							{releaseInfo.tag}{releaseInfo.prerelease ? " (pre-release)" : ""}
+						</span>
+					</div>
+					<div class="flex justify-between gap-4">
+						<span class="text-base-content/60">Firmware</span>
+						<span class="font-mono">
+							{releaseInfo.firmware.name} · {formatBytes(releaseInfo.firmware.size)}
+						</span>
+					</div>
+					<div class="flex justify-between gap-4">
+						<span class="text-base-content/60">Filesystem</span>
+						<span class="font-mono">
+							{releaseInfo.filesystem.name} · {formatBytes(releaseInfo.filesystem.size)}
+						</span>
+					</div>
+				</div>
+
+				<div class="flex flex-wrap items-center gap-3 mt-3">
+					<button
+						type="button"
+						class="btn btn-sm btn-primary"
+						onclick={installFromGitHub}
+						disabled={installingRelease || otaStatus.in_progress || isDisabled}
+					>
+						{#if installingRelease}
+							<span class="loading loading-spinner loading-xs"></span>
+						{/if}
+						Install {releaseInfo.tag}
+					</button>
+					<p class="text-xs text-base-content/60">
+						Both images are written, then the device reboots.
+					</p>
+				</div>
+			{/if}
 		</div>
 	</div>
 

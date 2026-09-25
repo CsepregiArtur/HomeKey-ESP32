@@ -25,6 +25,13 @@
 #include "BackupManager.hpp"
 #include "RestoreManager.hpp"
 #include "cJSON.h"
+// Must come after the Arduino headers. Arduino's IPAddress.h expands lwip's
+// INADDR_NONE (which is IPADDR_NONE, i.e. `((u32_t)0xffffffffUL)`), so if lwip is
+// pulled in first that expansion produces `const IPAddress ((u32_t)0xffffffffUL)(0,0,0,0)`
+// and the header fails to parse. Including esp_http_client.h last means Arduino has
+// already consumed the macro by the time the HTTP client drags lwip in.
+#include "esp_http_client.h"
+#include "esp_crt_bundle.h"
 #include "config.hpp"
 #include "esp_chip_info.h"
 #include "esp_err.h"
@@ -699,7 +706,11 @@ void WebServerManager::setupRoutes() {
       // WebSocket
       {"/ws", HTTP_GET, handleWebSocket, this, true},
 
-      // OTA endpoints
+      // OTA endpoints. The two GitHub-update routes must be registered *before* the
+      // `/ota/*` wildcard: handlers are matched in registration order, and the wildcard
+      // would otherwise swallow them and treat the request as a firmware upload.
+      {"/ota/release", HTTP_GET, handleGetReleaseInfo, this},
+      {"/ota/install", HTTP_POST, handleInstallRelease, this},
       {"/ota/*", HTTP_POST, handleOTAUpload, this},
 
       // Certificate endpoints
@@ -2519,6 +2530,547 @@ void WebServerManager::statusTimerCallback(void *arg) {
 // ============================================================================
 // OTA Implementation
 // ============================================================================
+
+// ============================================================================
+// GitHub release updater
+// ============================================================================
+//
+// Pulls a published release straight from GitHub instead of asking the user to
+// download a .bin and upload it through the browser. Two channels:
+//
+//   * production  - GET /releases/latest, which GitHub defines as the newest release
+//                   that is neither a draft nor a pre-release.
+//   * development - the newest entry of GET /releases, which is where pre-releases
+//                   appear. /releases/latest silently skips them, so the development
+//                   channel cannot be built on it.
+//
+// Only the assets the release workflow uploads are used: `esp32.firmware.bin` (the OTA
+// application image) and `littlefs.bin` (the Web UI filesystem). Both are installed
+// together, because the UI lives in the filesystem image and a firmware-only update can
+// leave the two out of step.
+//
+// SECURITY NOTE: while the device runs in Path 1 (see
+// docs/content/PATH2_SECURITY_ROLLOUT.md) Secure Boot is off, so nothing here is
+// signature-checked - only the ESP image header and checksum that esp_ota_end()
+// validates, over a TLS connection whose certificate is verified against the CA bundle.
+// Enabling Secure Boot is what turns "matches what GitHub served" into "is what the
+// maintainer signed".
+
+namespace {
+
+// Point these at a different fork to change where updates come from.
+constexpr const char *kGithubOwner = "CsepregiArtur";
+constexpr const char *kGithubRepo = "HomeKey-ESP32";
+
+constexpr const char *kFirmwareAsset = "esp32.firmware.bin";
+constexpr const char *kFilesystemAsset = "littlefs.bin";
+
+/// Upper bound on an API response body, to avoid exhausting the heap on a bad reply.
+constexpr size_t kMaxJsonBody = 256 * 1024;
+
+struct ReleaseInfo {
+  std::string error;
+  std::string tag;
+  std::string name;
+  std::string publishedAt;
+  bool prerelease = false;
+  std::string firmwareUrl;
+  std::string filesystemUrl;
+  size_t firmwareSize = 0;
+  size_t filesystemSize = 0;
+};
+
+using ProgressFn = std::function<void(size_t, size_t)>;
+
+/// GET a URL into `out`. Only for the small JSON API calls, never for the images.
+bool httpGetToString(const std::string &url, std::string &out, std::string &err) {
+  esp_http_client_config_t cfg = {};
+  cfg.url = url.c_str();
+  cfg.crt_bundle_attach = esp_crt_bundle_attach;
+  cfg.timeout_ms = 20000;
+  cfg.buffer_size = 2048;
+
+  esp_http_client_handle_t client = esp_http_client_init(&cfg);
+  if (!client) {
+    err = "Could not create the HTTP client";
+    return false;
+  }
+  // GitHub rejects API requests that do not identify themselves.
+  esp_http_client_set_header(client, "User-Agent", "HomeKey-ESP32");
+  esp_http_client_set_header(client, "Accept", "application/vnd.github+json");
+
+  if (esp_http_client_open(client, 0) != ESP_OK) {
+    err = "Could not reach GitHub";
+    esp_http_client_cleanup(client);
+    return false;
+  }
+  esp_http_client_fetch_headers(client);
+  const int status = esp_http_client_get_status_code(client);
+  if (status != 200) {
+    // 404 from /releases/latest means "no stable release published yet".
+    err = (status == 404) ? "No matching release found"
+                          : fmt::format("GitHub returned HTTP {}", status);
+    esp_http_client_close(client);
+    esp_http_client_cleanup(client);
+    return false;
+  }
+
+  std::vector<char> buf(1024);
+  out.clear();
+  int read = 0;
+  while ((read = esp_http_client_read(client, buf.data(), buf.size())) > 0) {
+    out.append(buf.data(), read);
+    if (out.size() > kMaxJsonBody) {
+      err = "GitHub response was unexpectedly large";
+      esp_http_client_close(client);
+      esp_http_client_cleanup(client);
+      return false;
+    }
+  }
+  esp_http_client_close(client);
+  esp_http_client_cleanup(client);
+
+  if (read < 0) {
+    err = "The connection to GitHub was interrupted";
+    return false;
+  }
+  return true;
+}
+
+/// Pick the two assets we care about out of a release object.
+void collectAssets(cJSON *release, ReleaseInfo &info) {
+  cJSON *assets = cJSON_GetObjectItemCaseSensitive(release, "assets");
+  if (!cJSON_IsArray(assets)) {
+    return;
+  }
+  for (cJSON *asset = assets->child; asset != nullptr; asset = asset->next) {
+    cJSON *name = cJSON_GetObjectItemCaseSensitive(asset, "name");
+    cJSON *url = cJSON_GetObjectItemCaseSensitive(asset, "browser_download_url");
+    cJSON *size = cJSON_GetObjectItemCaseSensitive(asset, "size");
+    if (!cJSON_IsString(name) || !cJSON_IsString(url)) {
+      continue;
+    }
+    const std::string assetName = name->valuestring;
+    const size_t assetSize = cJSON_IsNumber(size) ? static_cast<size_t>(size->valuedouble) : 0;
+    if (assetName == kFirmwareAsset) {
+      info.firmwareUrl = url->valuestring;
+      info.firmwareSize = assetSize;
+    } else if (assetName == kFilesystemAsset) {
+      info.filesystemUrl = url->valuestring;
+      info.filesystemSize = assetSize;
+    }
+  }
+}
+
+/// Resolve the release for the requested channel.
+bool resolveRelease(bool developmentChannel, ReleaseInfo &info) {
+  const std::string url = developmentChannel
+      ? fmt::format("https://api.github.com/repos/{}/{}/releases", kGithubOwner, kGithubRepo)
+      : fmt::format("https://api.github.com/repos/{}/{}/releases/latest", kGithubOwner, kGithubRepo);
+
+  std::string body;
+  if (!httpGetToString(url, body, info.error)) {
+    return false;
+  }
+
+  cJSON *root = cJSON_Parse(body.c_str());
+  if (root == nullptr) {
+    info.error = "Could not parse the GitHub response";
+    return false;
+  }
+
+  // /releases returns an array (newest first); /releases/latest returns one object.
+  cJSON *release = root;
+  if (cJSON_IsArray(root)) {
+    release = cJSON_GetArrayItem(root, 0);
+  }
+  if (!cJSON_IsObject(release)) {
+    info.error = developmentChannel ? "No releases found" : "No stable release published yet";
+    cJSON_Delete(root);
+    return false;
+  }
+
+  auto stringField = [release](const char *key) {
+    cJSON *v = cJSON_GetObjectItemCaseSensitive(release, key);
+    return cJSON_IsString(v) ? std::string(v->valuestring) : std::string();
+  };
+  info.tag = stringField("tag_name");
+  info.name = stringField("name");
+  info.publishedAt = stringField("published_at");
+  info.prerelease = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(release, "prerelease"));
+  collectAssets(release, info);
+  cJSON_Delete(root);
+
+  if (info.firmwareUrl.empty()) {
+    info.error = fmt::format("Release {} does not contain {}", info.tag, kFirmwareAsset);
+    return false;
+  }
+  if (info.filesystemUrl.empty()) {
+    info.error = fmt::format("Release {} does not contain {}", info.tag, kFilesystemAsset);
+    return false;
+  }
+  return true;
+}
+
+/// Open a streaming GET for a download URL and report the expected body size.
+bool openAssetStream(const std::string &url, esp_http_client_handle_t &client, std::string &err) {
+  esp_http_client_config_t cfg = {};
+  cfg.url = url.c_str();
+  cfg.crt_bundle_attach = esp_crt_bundle_attach;
+  cfg.timeout_ms = 30000;
+  cfg.buffer_size = 4096;
+
+  client = esp_http_client_init(&cfg);
+  if (!client) {
+    err = "Could not create the HTTP client";
+    return false;
+  }
+  esp_http_client_set_header(client, "User-Agent", "HomeKey-ESP32");
+
+  if (esp_http_client_open(client, 0) != ESP_OK) {
+    err = "Could not start the download";
+    esp_http_client_cleanup(client);
+    client = nullptr;
+    return false;
+  }
+  esp_http_client_fetch_headers(client);
+  const int status = esp_http_client_get_status_code(client);
+  if (status != 200) {
+    err = fmt::format("The download failed with HTTP {}", status);
+    esp_http_client_close(client);
+    esp_http_client_cleanup(client);
+    client = nullptr;
+    return false;
+  }
+  return true;
+}
+
+/// Download an application image and stage it as the next boot partition.
+bool streamIntoOta(const std::string &url, size_t expectedSize,
+                   const esp_partition_t *partition, const ProgressFn &onProgress,
+                   std::string &err) {
+  esp_http_client_handle_t client = nullptr;
+  if (!openAssetStream(url, client, err)) {
+    return false;
+  }
+
+  const int reported = static_cast<int>(esp_http_client_get_content_length(client));
+  const size_t total = reported > 0 ? static_cast<size_t>(reported) : expectedSize;
+  if (total == 0 || total > partition->size) {
+    err = "The image does not fit the OTA partition";
+    esp_http_client_close(client);
+    esp_http_client_cleanup(client);
+    return false;
+  }
+
+  esp_ota_handle_t handle = 0;
+  if (esp_ota_begin(partition, total, &handle) != ESP_OK) {
+    err = "Could not start writing the firmware";
+    esp_http_client_close(client);
+    esp_http_client_cleanup(client);
+    return false;
+  }
+
+  std::vector<char> buf(4096);
+  size_t written = 0;
+  bool failed = false;
+  int read = 0;
+  while ((read = esp_http_client_read(client, buf.data(), buf.size())) > 0) {
+    if (esp_ota_write(handle, buf.data(), read) != ESP_OK) {
+      err = "Writing the firmware failed";
+      failed = true;
+      break;
+    }
+    written += static_cast<size_t>(read);
+    if (onProgress) {
+      onProgress(written, total);
+    }
+    // Yield so the idle task, the WebSocket sender and the watchdog keep running
+    // during what can be a multi-megabyte download.
+    vTaskDelay(1);
+  }
+  if (!failed && read < 0) {
+    err = "The firmware download was interrupted";
+    failed = true;
+  }
+  if (!failed && written == 0) {
+    err = "The firmware download was empty";
+    failed = true;
+  }
+
+  esp_http_client_close(client);
+  esp_http_client_cleanup(client);
+
+  if (failed) {
+    esp_ota_abort(handle);
+    return false;
+  }
+  if (esp_ota_end(handle) != ESP_OK) {
+    // esp_ota_end() validates the image header and checksum; it consumes the handle.
+    err = "The downloaded firmware image is not valid";
+    return false;
+  }
+  if (esp_ota_set_boot_partition(partition) != ESP_OK) {
+    err = "Could not mark the new firmware as the boot image";
+    return false;
+  }
+  return true;
+}
+
+/// Download a filesystem image into the LittleFS partition.
+bool streamIntoFilesystem(const std::string &url, size_t expectedSize,
+                          const esp_partition_t *partition, const ProgressFn &onProgress,
+                          std::string &err) {
+  esp_http_client_handle_t client = nullptr;
+  if (!openAssetStream(url, client, err)) {
+    return false;
+  }
+
+  const int reported = static_cast<int>(esp_http_client_get_content_length(client));
+  const size_t total = reported > 0 ? static_cast<size_t>(reported) : expectedSize;
+  if (total == 0 || total > partition->size) {
+    err = "The filesystem image does not fit its partition";
+    esp_http_client_close(client);
+    esp_http_client_cleanup(client);
+    return false;
+  }
+
+  // Unmount before touching the partition, and remount afterwards.
+  LittleFS.end();
+  if (esp_partition_erase_range(partition, 0, partition->size) != ESP_OK) {
+    err = "Could not erase the filesystem partition";
+    esp_http_client_close(client);
+    esp_http_client_cleanup(client);
+    return false;
+  }
+
+  std::vector<char> buf(4096);
+  size_t written = 0;
+  bool failed = false;
+  int read = 0;
+  while ((read = esp_http_client_read(client, buf.data(), buf.size())) > 0) {
+    if (esp_partition_write(partition, written, buf.data(), read) != ESP_OK) {
+      err = "Writing the filesystem failed";
+      failed = true;
+      break;
+    }
+    written += static_cast<size_t>(read);
+    if (onProgress) {
+      onProgress(written, total);
+    }
+    vTaskDelay(1);
+  }
+  if (!failed && read < 0) {
+    err = "The filesystem download was interrupted";
+    failed = true;
+  }
+  if (!failed && written == 0) {
+    err = "The filesystem download was empty";
+    failed = true;
+  }
+
+  esp_http_client_close(client);
+  esp_http_client_cleanup(client);
+
+  if (failed) {
+    return false;
+  }
+  if (!LittleFS.begin()) {
+    err = "The new filesystem could not be mounted";
+    return false;
+  }
+  return true;
+}
+
+} // namespace
+
+esp_err_t WebServerManager::handleGetReleaseInfo(httpd_req_t *req) {
+  WebServerManager *instance = getInstance(req);
+  if (!instance || !instance->basicAuth(req)) {
+    return sendAuthFailure(req);
+  }
+
+  bool developmentChannel = false;
+  char query[128];
+  char value[16];
+  if (httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK &&
+      httpd_query_key_value(query, "channel", value, sizeof(value)) == ESP_OK) {
+    developmentChannel = (strcmp(value, "dev") == 0);
+  }
+
+  ReleaseInfo release;
+  if (!resolveRelease(developmentChannel, release)) {
+    return sendJsonError(req, release.error.empty() ? "Could not reach GitHub" : release.error);
+  }
+
+  JsonBuilder res = JsonBuilder::object();
+  res.addBool("success", true);
+  res.withObject("data", [&](JsonBuilder &data) {
+    data.addString("channel", developmentChannel ? "dev" : "stable");
+    data.addString("tag", release.tag.c_str());
+    data.addString("name", release.name.c_str());
+    data.addString("published_at", release.publishedAt.c_str());
+    data.addBool("prerelease", release.prerelease);
+    data.addString("current_version", esp_app_get_description()->version);
+    data.withObject("firmware", [&](JsonBuilder &asset) {
+      asset.addString("name", kFirmwareAsset);
+      asset.addNumber("size", static_cast<double>(release.firmwareSize));
+    });
+    data.withObject("filesystem", [&](JsonBuilder &asset) {
+      asset.addString("name", kFilesystemAsset);
+      asset.addNumber("size", static_cast<double>(release.filesystemSize));
+    });
+  });
+
+  httpd_resp_set_type(req, "application/json");
+  const std::string out = res.toStringUnformatted();
+  httpd_resp_send(req, out.c_str(), HTTPD_RESP_USE_STRLEN);
+  return ESP_OK;
+}
+
+esp_err_t WebServerManager::handleInstallRelease(httpd_req_t *req) {
+  WebServerManager *instance = getInstance(req);
+  if (!instance || !instance->basicAuth(req)) {
+    return sendAuthFailure(req);
+  }
+
+  bool expected = false;
+  if (!instance->m_otaInProgress.compare_exchange_strong(expected, true)) {
+    return sendJsonError(req, "An update is already in progress", "409 Conflict");
+  }
+
+  bool developmentChannel = false;
+  if (req->content_len > 0 && req->content_len < 512) {
+    std::vector<char> body(req->content_len + 1, '\0');
+    const int received = httpd_req_recv(req, body.data(), req->content_len);
+    if (received > 0) {
+      cJSON *root = cJSON_Parse(body.data());
+      if (root != nullptr) {
+        cJSON *channel = cJSON_GetObjectItemCaseSensitive(root, "channel");
+        developmentChannel = cJSON_IsString(channel) && strcmp(channel->valuestring, "dev") == 0;
+        cJSON_Delete(root);
+      }
+    }
+  }
+
+  auto *params = new GithubOtaParams{instance, developmentChannel, new OTAState()};
+  BaseType_t task;
+#ifndef CONFIG_FREERTOS_UNICORE
+  task = xTaskCreatePinnedToCore(githubOtaTask, "gh_ota_task", 8192, params, 5, nullptr, 1);
+#else
+  task = xTaskCreate(githubOtaTask, "gh_ota_task", 8192, params, 5, nullptr);
+#endif
+  if (task != pdPASS) {
+    ESP_LOGE(TAG, "Failed to create the GitHub update task");
+    delete params->state;
+    delete params;
+    instance->m_otaInProgress = false;
+    return sendJsonError(req, "Could not start the update", "500 Internal Server Error");
+  }
+
+  JsonBuilder res = JsonBuilder::object();
+  res.addBool("success", true);
+  res.addString("message",
+                "Downloading the update from GitHub. The device reboots when it finishes.");
+  httpd_resp_set_type(req, "application/json");
+  const std::string out = res.toStringUnformatted();
+  httpd_resp_send(req, out.c_str(), HTTPD_RESP_USE_STRLEN);
+  return ESP_OK;
+}
+
+void WebServerManager::githubOtaTask(void *pvParameters) {
+  GithubOtaParams *params = static_cast<GithubOtaParams *>(pvParameters);
+  WebServerManager *instance = params->instance;
+  OTAState *state = params->state;
+
+  state->inProgress = true;
+  state->writtenBytes = 0;
+  state->totalBytes = 0;
+  state->error.clear();
+  state->currentUploadType = OTAUploadType::FIRMWARE;
+  instance->broadcastOTAStatus(*state);
+
+  bool succeeded = false;
+  do {
+    ReleaseInfo release;
+    if (!resolveRelease(params->developmentChannel, release)) {
+      state->error = release.error.empty() ? "Could not resolve the release" : release.error;
+      break;
+    }
+    ESP_LOGI(TAG, "Updating from GitHub release %s (%s)", release.tag.c_str(),
+             release.prerelease ? "pre-release" : "stable");
+
+    // Firmware first. If the filesystem landed but the firmware did not, the web UI
+    // would be newer than the backend that serves it.
+    state->currentUploadType = OTAUploadType::FIRMWARE;
+    state->writtenBytes = 0;
+    state->totalBytes = release.firmwareSize;
+    {
+      const esp_partition_t *partition = esp_ota_get_next_update_partition(nullptr);
+      if (partition == nullptr) {
+        state->error = "No OTA partition available";
+        break;
+      }
+      std::string err;
+      const auto progress = [&](size_t written, size_t total) {
+        state->writtenBytes = written;
+        state->totalBytes = total;
+        instance->broadcastOTAStatus(*state);
+      };
+      if (!streamIntoOta(release.firmwareUrl, release.firmwareSize, partition, progress, err)) {
+        state->error = "Firmware: " + err;
+        break;
+      }
+    }
+
+    state->currentUploadType = OTAUploadType::LITTLEFS;
+    state->writtenBytes = 0;
+    state->totalBytes = release.filesystemSize;
+    instance->broadcastOTAStatus(*state);
+    {
+      const esp_partition_t *partition = esp_partition_find_first(
+          ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_SPIFFS, "spiffs");
+      if (partition == nullptr) {
+        state->error = "No filesystem partition available";
+        break;
+      }
+      std::string err;
+      const auto progress = [&](size_t written, size_t total) {
+        state->writtenBytes = written;
+        state->totalBytes = total;
+        instance->broadcastOTAStatus(*state);
+      };
+      if (!streamIntoFilesystem(release.filesystemUrl, release.filesystemSize, partition,
+                                progress, err)) {
+        state->error = "Filesystem: " + err;
+        break;
+      }
+    }
+
+    succeeded = true;
+  } while (false);
+
+  state->inProgress = false;
+  instance->broadcastOTAStatus(*state);
+  instance->m_otaInProgress = false;
+
+  if (!succeeded) {
+    ESP_LOGE(TAG, "GitHub update failed: %s", state->error.c_str());
+  }
+
+  // Give the WebSocket task time to flush the final status before restarting.
+  vTaskDelay(pdMS_TO_TICKS(1500));
+
+  const bool reboot = succeeded;
+  delete state;
+  delete params;
+
+  if (reboot) {
+    ESP_LOGI(TAG, "GitHub update complete; rebooting");
+    esp_restart();
+  }
+  vTaskDelete(nullptr);
+}
 
 esp_err_t WebServerManager::handleOTAUpload(httpd_req_t *req) {
   WebServerManager *instance = getInstance(req);

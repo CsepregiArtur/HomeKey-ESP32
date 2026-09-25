@@ -132,11 +132,25 @@ private:
     OTAState *state;
   };
 
+  /**
+   * @brief Work item for the "update from GitHub" path.
+   *
+   * Unlike OTAParams this carries no httpd_req_t: the image comes from GitHub over
+   * esp_http_client rather than from a browser upload, so the task owns the whole
+   * download -> flash -> reboot sequence.
+   */
+  struct GithubOtaParams {
+    WebServerManager *instance;
+    bool developmentChannel;
+    OTAState *state;
+  };
+
   // ------------------------------------------------------------------------
   // Static Task Callbacks
   // ------------------------------------------------------------------------
   static void ws_send_task(void *arg);
   static void otaTask(void *pvParameters);
+  static void githubOtaTask(void *pvParameters);
   static void statusTimerCallback(void *arg);
 
   // ------------------------------------------------------------------------
@@ -155,6 +169,8 @@ private:
   static esp_err_t handleStaticFiles(httpd_req_t *req);
   static esp_err_t handleWebSocket(httpd_req_t *req);
   static esp_err_t handleOTAUpload(httpd_req_t *req);
+  static esp_err_t handleGetReleaseInfo(httpd_req_t *req);
+  static esp_err_t handleInstallRelease(httpd_req_t *req);
   static esp_err_t handleCertificateUpload(httpd_req_t *req);
   static esp_err_t handleCertificateStatus(httpd_req_t *req);
   static esp_err_t handleCertificateDelete(httpd_req_t *req);
