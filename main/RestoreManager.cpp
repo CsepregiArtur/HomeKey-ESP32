@@ -12,6 +12,7 @@
 #include <cJSON.h>
 #include <esp_log.h>
 #include <fmt/format.h>
+#include <nvs.h>
 
 const char *RestoreManager::TAG = "Restore";
 
@@ -161,12 +162,64 @@ bool RestoreManager::restore(const std::vector<uint8_t> &encryptedBlob,
         m_readerData.save();
     }
 
+    // 5. Device identity and credentials, when the backup carries them.
+    //
+    // The credential store is the reader's private key and the enrolled issuers' endpoint
+    // keys; the HAP namespace is the accessory identity Apple Home recognises together with
+    // the controllers paired to it. Writing them back is what makes this a replacement of
+    // the *device* rather than of its membership - which is also why such a backup deserves
+    // to be kept like a key. A backup without them restores exactly as it did before.
+    bool restoredCredentials = false;
+    const cJSON *credentialsNode = cJSON_GetObjectItemCaseSensitive(root, "credentials");
+    if (cJSON_IsObject(credentialsNode)) {
+        const std::vector<uint8_t> readerStore =
+            hexDecode(getString(credentialsNode, "reader_store"));
+        if (!readerStore.empty() && m_readerData.importRaw(readerStore)) {
+            restoredCredentials = true;
+        } else if (!readerStore.empty()) {
+            ESP_LOGW(TAG, "Backup carries a credential store that could not be applied.");
+        }
+
+        const cJSON *hapNode = cJSON_GetObjectItemCaseSensitive(credentialsNode, "hap");
+        if (cJSON_IsObject(hapNode)) {
+            nvs_handle_t hap{};
+            if (nvs_open("HAP", NVS_READWRITE, &hap) == ESP_OK) {
+                const std::vector<uint8_t> accessory = hexDecode(getString(hapNode, "accessory"));
+                const std::vector<uint8_t> hapHash = hexDecode(getString(hapNode, "hap_hash"));
+                const std::string setupId = getString(hapNode, "setup_id");
+                bool wrote = false;
+                if (!accessory.empty() &&
+                    nvs_set_blob(hap, "ACCESSORY", accessory.data(), accessory.size()) == ESP_OK) {
+                    wrote = true;
+                }
+                if (!hapHash.empty() &&
+                    nvs_set_blob(hap, "HAPHASH", hapHash.data(), hapHash.size()) == ESP_OK) {
+                    wrote = true;
+                }
+                if (!setupId.empty() && nvs_set_str(hap, "SETUPID", setupId.c_str()) == ESP_OK) {
+                    wrote = true;
+                }
+                if (wrote) {
+                    nvs_commit(hap);
+                    restoredCredentials = true;
+                } else {
+                    ESP_LOGW(TAG, "Backup carries pairing state, but nothing could be written.");
+                }
+                nvs_close(hap);
+            } else {
+                ESP_LOGW(TAG, "Could not open the HAP namespace to restore pairing state.");
+            }
+        }
+    }
+
     cJSON_Delete(root);
 
     m_state = State::COMPLETED;
+    m_rebootRequired = restoredCredentials;
     emitBackupEvent(RESTORE_COMPLETED, true, m_node.info().node_id);
     m_audit.record(AuditManager::BACKUP_RESTORED, AuditManager::SOURCE_LOCAL,
                    AuditManager::RESULT_SUCCESS, m_node.info().node_id, "");
-    ESP_LOGI(TAG, "Restore complete. Replacement node: %s", m_node.info().node_id.c_str());
+    ESP_LOGI(TAG, "Restore complete. Node: %s%s", m_node.info().node_id.c_str(),
+             restoredCredentials ? " (device identity and credentials restored)" : "");
     return true;
 }

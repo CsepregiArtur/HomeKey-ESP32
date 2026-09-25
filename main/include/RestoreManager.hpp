@@ -11,9 +11,14 @@ class AuditManager;
 
 /**
  * Drives the replacement-node restore workflow. It decrypts/verifies a backup
- * (via BackupManager), restores household membership + safe node configuration,
- * mints a NEW node identity (never a clone) and explicitly leaves the HomeKey
- * reader identity + endpoint keys un-restored (those are re-provisioned).
+ * (via BackupManager) and restores household membership + safe node configuration.
+ *
+ * It also restores the HomeKey credential store and the HomeKit pairing state, but **only
+ * from a backup that carries them** - which it does when it was taken with that asked for,
+ * because those are the reader's private key and the accessory identity Apple Home trusts.
+ * With them, the device comes back as the same device: no tags re-enrolled, nothing
+ * re-paired. Without them the older behaviour stands: a new node identity is minted (never
+ * a clone) and enrolled devices have to be re-provisioned.
  */
 class RestoreManager {
 public:
@@ -31,6 +36,11 @@ public:
     bool restore(const std::vector<uint8_t> &encryptedBlob,
                  const std::vector<uint8_t> &recoverySecret, std::string &errorOut);
 
+    /// True when the last restore wrote device identity or credentials, which only takes
+    /// effect after a restart: the reader holds its key material in RAM, and HomeSpan reads
+    /// the pairing state at boot.
+    bool rebootRequired() const { return m_rebootRequired; }
+
 private:
     HouseholdManager &m_household;
     NodeIdentityManager &m_node;
@@ -39,5 +49,6 @@ private:
     AuditManager &m_audit;
 
     State m_state = State::IDLE;
+    bool m_rebootRequired = false;
     static const char *TAG;
 };

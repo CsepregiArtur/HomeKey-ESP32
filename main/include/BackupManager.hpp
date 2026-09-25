@@ -47,7 +47,14 @@ public:
     bool begin();
 
     /// Build an encrypted, signed backup blob. Empty on failure.
-    std::vector<uint8_t> createBackup();
+    ///
+    /// With @p includeCredentials the payload also carries the HomeKey credential store and
+    /// the HomeKit pairing state: the reader's private key, the enrolled issuers' endpoint
+    /// keys, and the accessory identity Apple Home recognises together with the controllers
+    /// paired to it. That is what lets a replacement node come back as the same device - no
+    /// tags re-enrolled, nothing re-paired - and it is exactly why such a file has to be
+    /// kept like a key rather than like a document. Off unless asked for.
+    std::vector<uint8_t> createBackup(bool includeCredentials = false);
 
     /// Decrypt + verify a backup blob with a caller-supplied recovery secret.
     /// Fills `payloadOut` (JSON) and `metaOut`. Fails closed on any error.

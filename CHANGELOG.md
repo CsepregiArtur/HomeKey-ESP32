@@ -7,6 +7,17 @@ Notable changes per release. User-facing detail lives in the docs:
 
 ### Added
 
+* **Back up the keys, not just the configuration.** A backup can now carry this device's own
+  credentials - the reader credential store (its identity plus the enrolled issuers' endpoint
+  keys) and the HomeKit pairing state - so a replacement node comes back as *the same device*:
+  no tags re-enrolled, nothing re-paired, the existing Apple Home setup still recognises it. It
+  is **off unless asked for**, and it sits inside the encrypted payload with everything else.
+  `POST /backup/create` takes `{"include_credentials": true}` and answers with what it actually
+  managed to put in (`includes_credentials`), and a restore that applied credentials answers
+  `reboot_required: true` and restarts to put them into use.
+  * A backup taken with this is the keys to the door, not a copy of the settings: it is worth
+    a password manager and an offline copy rather than a chat message.
+
 * **Verify OTA images without burning eFuses.** The "signed apps without Secure Boot"
   configuration - and what it implies for updates - is documented in
   [Security](docs/content/security.md#verify-ota-images), with hardware evidence: enabling it

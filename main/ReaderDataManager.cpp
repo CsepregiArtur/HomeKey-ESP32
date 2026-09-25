@@ -289,6 +289,63 @@ void NvsCredentialStore::save() {
 }
 
 // ---------------------------------------------------------------------------
+// Raw export / import (used by a backup that was asked to carry the keys)
+// ---------------------------------------------------------------------------
+
+std::vector<uint8_t> NvsCredentialStore::exportRaw() const {
+    if (!initialized_) {
+        ESP_LOGE(TAG, "Cannot export, not initialized.");
+        return {};
+    }
+
+    size_t required = 0;
+    esp_err_t sizeErr = nvs_get_blob(handle_, NVS_KEY, NULL, &required);
+    if (sizeErr != ESP_OK || required == 0) {
+        // Nothing stored yet is not an error worth shouting about: a node that has never
+        // enrolled a credential has no reader identity to hand over either.
+        ESP_LOGW(TAG, "No credential blob to export (%s).", esp_err_to_name(sizeErr));
+        return {};
+    }
+
+    std::vector<uint8_t> blob(required);
+    esp_err_t readErr = nvs_get_blob(handle_, NVS_KEY, blob.data(), &required);
+    if (readErr != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to read the credential blob: %s", esp_err_to_name(readErr));
+        return {};
+    }
+    blob.resize(required);
+    return blob;
+}
+
+bool NvsCredentialStore::importRaw(const std::vector<uint8_t>& blob) {
+    if (!initialized_) {
+        ESP_LOGE(TAG, "Cannot import, not initialized.");
+        return false;
+    }
+    if (blob.empty()) {
+        ESP_LOGE(TAG, "Refusing to import an empty credential blob.");
+        return false;
+    }
+
+    esp_err_t setErr = nvs_set_blob(handle_, NVS_KEY, blob.data(), blob.size());
+    if (setErr != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to write the credential blob: %s", esp_err_to_name(setErr));
+        return false;
+    }
+    esp_err_t commitErr = nvs_commit(handle_);
+    if (commitErr != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to commit the credential blob: %s", esp_err_to_name(commitErr));
+        return false;
+    }
+
+    // Read it back through the normal path, so what this device believes it holds is what
+    // it actually stored rather than what it was handed.
+    load();
+    ESP_LOGI(TAG, "Credential store imported (%u bytes).", static_cast<unsigned>(blob.size()));
+    return true;
+}
+
+// ---------------------------------------------------------------------------
 // Load / snapshot
 // ---------------------------------------------------------------------------
 

@@ -161,7 +161,57 @@ bool BackupManager::begin() {
     return true;
 }
 
-std::vector<uint8_t> BackupManager::createBackup() {
+// ---------------------------------------------------------------------------
+// HomeKit pairing state (read from the namespace HomeSpan keeps it in)
+// ---------------------------------------------------------------------------
+//
+// These read NVS directly rather than going through HomeSpan: the values are already stored
+// by the time a backup can be asked for, they have no accessor, and writing them back is
+// what "resetting the pairing" does in reverse.
+
+static std::vector<uint8_t> readHapBlob(const char *key) {
+    nvs_handle_t handle{};
+    if (nvs_open("HAP", NVS_READONLY, &handle) != ESP_OK) {
+        return {};
+    }
+    size_t size = 0;
+    if (nvs_get_blob(handle, key, nullptr, &size) != ESP_OK || size == 0) {
+        nvs_close(handle);
+        return {};
+    }
+    std::vector<uint8_t> blob(size);
+    if (nvs_get_blob(handle, key, blob.data(), &size) != ESP_OK) {
+        nvs_close(handle);
+        return {};
+    }
+    blob.resize(size);
+    nvs_close(handle);
+    return blob;
+}
+
+static std::string readHapString(const char *key) {
+    nvs_handle_t handle{};
+    if (nvs_open("HAP", NVS_READONLY, &handle) != ESP_OK) {
+        return {};
+    }
+    size_t size = 0;
+    if (nvs_get_str(handle, key, nullptr, &size) != ESP_OK || size == 0) {
+        nvs_close(handle);
+        return {};
+    }
+    std::string value(size, '\0');
+    if (nvs_get_str(handle, key, value.data(), &size) != ESP_OK) {
+        nvs_close(handle);
+        return {};
+    }
+    nvs_close(handle);
+    if (!value.empty() && value.back() == '\0') {
+        value.pop_back();
+    }
+    return value;
+}
+
+std::vector<uint8_t> BackupManager::createBackup(bool includeCredentials) {
     emitBackupEvent(BACKUP_STARTED, true, "");
     const household::HouseholdInfo &hh = m_household.info();
     const household::NodeInfo &node = m_node.info();
@@ -194,6 +244,27 @@ std::vector<uint8_t> BackupManager::createBackup() {
                                    i + 1 < snap.issuers.size() ? "," : "");
     }
 
+    // --- Optional device identity and credentials ---
+    std::string credentialsJson;
+    if (includeCredentials) {
+        const std::vector<uint8_t> readerStore = m_readerData.exportRaw();
+        const std::vector<uint8_t> accessory = readHapBlob("ACCESSORY");
+        const std::vector<uint8_t> hapHash = readHapBlob("HAPHASH");
+        const std::string setupId = readHapString("SETUPID");
+        credentialsJson = fmt::format(
+            ",\"credentials\":{{\"reader_store\":\"{}\",\"hap\":{{\"accessory\":\"{}\","
+            "\"hap_hash\":\"{}\",\"setup_id\":\"{}\"}}}}",
+            hexEncode(readerStore), hexEncode(accessory), hexEncode(hapHash), jsonEscape(setupId));
+        ESP_LOGI(TAG, "Backup includes credentials: %u bytes of reader store, %u of pairing.",
+                 static_cast<unsigned>(readerStore.size()), static_cast<unsigned>(accessory.size()));
+        if (readerStore.empty() || accessory.empty()) {
+            // Better to say so at the point of asking than to hand over a file that looks
+            // like a clone and is not one.
+            ESP_LOGW(TAG, "Asked to include credentials, but the reader store or the pairing "
+                          "state is empty; the backup will restore without them.");
+        }
+    }
+
     std::string payload = fmt::format(
         "{{\"household\":{{\"household_id\":\"{}\",\"household_name\":\"{}\","
         "\"trust_key\":\"{}\",\"recovery_metadata\":\"{}\",\"config_version\":{}}},"
@@ -202,7 +273,7 @@ std::vector<uint8_t> BackupManager::createBackup() {
         "\"mqtt_use_ssl\":{},\"mqtt_allow_insecure\":{},\"mqtt_hass_discovery\":{},"
         "\"web_auth_enabled\":{},\"web_username\":\"{}\",\"web_password\":\"{}\","
         "\"access_point_password\":\"{}\"}},"
-        "\"issuers\":[{}]}}",
+        "\"issuers\":[{}]{}}}",
         jsonEscape(hh.household_id), jsonEscape(hh.household_name),
         hexEncode(hh.trust_public_key), hexEncode(hh.recovery_metadata), hh.config_version,
         jsonEscape(misc.deviceName), jsonEscape(mqtt.mqttBroker), mqtt.mqttPort,
@@ -210,7 +281,8 @@ std::vector<uint8_t> BackupManager::createBackup() {
         mqtt.useSSL ? "true" : "false", mqtt.allowInsecure ? "true" : "false",
         mqtt.hassMqttDiscoveryEnabled ? "true" : "false",
         misc.webAuthEnabled ? "true" : "false", jsonEscape(misc.webUsername),
-        jsonEscape(misc.webPassword), jsonEscape(misc.accessPointPassword), issuersJson);
+        jsonEscape(misc.webPassword), jsonEscape(misc.accessPointPassword), issuersJson,
+        credentialsJson);
 
     // --- Header ---
     BackupMeta meta;

@@ -78,6 +78,24 @@ public:
     /** Removes an issuer if present. Does NOT save — caller calls save(). */
     bool removeIssuerIfExists(const std::vector<uint8_t>& issuerId);
 
+    /**
+     * @brief The credential store exactly as it sits in NVS, for a backup asked to include it.
+     *
+     * The blob is the whole snapshot - the reader identity, the enrolled issuers and their
+     * labels - which is why a backup carrying it is a different thing to store than one
+     * that does not. Empty when nothing has been stored, or when the store is not up yet.
+     */
+    std::vector<uint8_t> exportRaw() const;
+
+    /**
+     * @brief Write a snapshot back and reload it from NVS. False on failure, with a log.
+     *
+     * Meant for a blob produced by exportRaw() on the same generation of this format. The
+     * caller reboots afterwards: the reader keeps its key material in RAM, and the HomeKit
+     * side of a restore is only read from NVS at boot.
+     */
+    bool importRaw(const std::vector<uint8_t>& blob);
+
 private:
     void load();
 

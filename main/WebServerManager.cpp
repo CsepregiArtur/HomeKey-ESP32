@@ -4150,11 +4150,34 @@ esp_err_t WebServerManager::handleCreateBackup(httpd_req_t *req) {
     if (!instance->m_backupManager) {
         return sendJsonError(req, "Backup manager unavailable", "503 Service Unavailable");
     }
-    const std::vector<uint8_t> blob = instance->m_backupManager->createBackup();
-    if (blob.empty()) {
-        return sendJsonError(req, "Backup creation failed (no household/node identity?)", "500 Internal Server Error");
+
+    // Optional body: {"include_credentials": true}. Read on every path, because a body left
+    // unread can be counted as the next request's data.
+    bool includeCredentials = false;
+    std::string body;
+    if (readBody(req, body, 1024)) {
+        if (!body.empty()) {
+            cJSON *root = cJSON_Parse(body.c_str());
+            if (root) {
+                const cJSON *flag = cJSON_GetObjectItemCaseSensitive(root, "include_credentials");
+                includeCredentials = cJSON_IsTrue(flag);
+                cJSON_Delete(root);
+            } else {
+                return sendJsonError(req, "Request body is not valid JSON", "400 Bad Request");
+            }
+        }
     }
-    sendJsonStr(req, fmt::format("{{\"success\":true,\"backup\":\"{}\"}}", hexEncodeBytes(blob)));
+
+    const std::vector<uint8_t> blob = instance->m_backupManager->createBackup(includeCredentials);
+    if (blob.empty()) {
+        return sendJsonError(req, "Backup creation failed (no household/node identity?)",
+                             "500 Internal Server Error");
+    }
+    // The answer says what the file is. A backup that carries the reader key and the pairing
+    // state is a different thing to store than one that does not, and whoever just asked for
+    // it should be told which one they are holding.
+    sendJsonStr(req, fmt::format("{{\"success\":true,\"includes_credentials\":{},\"backup\":\"{}\"}}",
+                                 includeCredentials ? "true" : "false", hexEncodeBytes(blob)));
     return ESP_OK;
 }
 
@@ -4191,7 +4214,20 @@ esp_err_t WebServerManager::handleRestoreBackup(httpd_req_t *req) {
     if (!instance->m_restoreManager->restore(blob, secret, error)) {
         return sendJsonError(req, error, "400 Bad Request");
     }
-    sendJsonStr(req, "{\"success\":true,\"message\":\"Restore completed\"}");
+
+    // Answer first, then restart when the restore replaced the device rather than just its
+    // membership: the reader keeps its key material in RAM and HomeSpan reads the pairing
+    // state at boot, so until it restarts the restored keys are on disk and not in use.
+    const bool reboot = instance->m_restoreManager->rebootRequired();
+    sendJsonStr(req, reboot ? "{\"success\":true,\"reboot_required\":true,\"message\":\"Restore "
+                              "completed; device identity and credentials restored\"}"
+                            : "{\"success\":true,\"reboot_required\":false,\"message\":\"Restore "
+                              "completed\"}");
+    if (reboot) {
+        vTaskDelay(pdMS_TO_TICKS(1000));  // let the response reach whoever asked
+        ESP_LOGW(TAG, "Restarting to apply the restored device identity.");
+        esp_restart();
+    }
     return ESP_OK;
 }
 
