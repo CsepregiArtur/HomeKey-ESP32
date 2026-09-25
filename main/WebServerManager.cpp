@@ -4152,10 +4152,16 @@ esp_err_t WebServerManager::handleCreateBackup(httpd_req_t *req) {
     }
 
     // Optional body: {"include_credentials": true}. Read on every path, because a body left
-    // unread can be counted as the next request's data.
+    // unread can be counted as the next request's data - but an absent body is the normal
+    // case (the Web UI and the Home Assistant integration both post nothing) and has to mean
+    // "no credentials" rather than a bad request. readBody answers 400 for an empty body
+    // itself, so it must not be called at all when there is nothing to read.
     bool includeCredentials = false;
-    std::string body;
-    if (readBody(req, body, 1024)) {
+    if (req->content_len > 0) {
+        std::string body;
+        if (!readBody(req, body, 1024)) {
+            return ESP_OK;  // readBody has already answered
+        }
         if (!body.empty()) {
             cJSON *root = cJSON_Parse(body.c_str());
             if (root) {
