@@ -123,8 +123,14 @@ CONFIG_ESP_SYSTEM_IN_IRAM=y
 # Encrypt the whole flash (firmware, NVS, LittleFS) with a per-device AES key.
 # The key lives in eFuse BLK1 and is never readable from software.
 CONFIG_SECURE_FLASH_ENC_ENABLED=y
-# Encrypt in place on the next boot instead of only releasing the key.
-CONFIG_SECURE_FLASH_ENCRYPTION_MODE_RELEASE=y
+# DEVELOPMENT mode: the first boot still burns FLASH_CRYPT_CNT and encrypts the
+# flash, but plaintext re-flashing stays possible (ESP-IDF prints a warning and
+# re-encrypts). This lets the encrypt/sign/flash pipeline be validated on real
+# hardware before committing to RELEASE mode, which is permanent. Switch to
+# CONFIG_SECURE_FLASH_ENCRYPTION_MODE_RELEASE=y for production images — but note
+# that once the eFuse is burned, switching modes does NOT re-enable plaintext
+# flashing; the choice only affects what the build+flasher will let you do.
+CONFIG_SECURE_FLASH_ENCRYPTION_MODE_DEVELOPMENT=y
 # Allow the app to use the encrypted-NVS API (required by CONFIG_NVS_ENCRYPTION).
 CONFIG_SECURE_FLASH_ENC_USE_ENCRYPTED_NVS=y
 

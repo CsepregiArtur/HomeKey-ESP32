@@ -93,6 +93,22 @@ The project aims to be the easy DIY solution for using Apple's HomeKey feature w
 > recovery secret and HomeKey configuration first**, and read
 > [`docs/content/security.md`](docs/content/security.md) before flashing.
 >
+> **Three ways to enable it — choose deliberately:**
+>
+> | # | Option | What it does | Reversible? |
+> | --- | --- | --- | --- |
+> | **1** | **Release mode**<br>`CONFIG_SECURE_FLASH_ENCRYPTION_MODE_RELEASE=y` | Burns the eFuses, encrypts the flash, Secure Boot locks the device to your signing key. Encrypted + signed images only. | ❌ **Permanent** |
+> | **2** | **Development mode**<br>`CONFIG_SECURE_FLASH_ENCRYPTION_MODE_DEVELOPMENT=y` | Same first-boot eFuse burn and in-place encryption, but plaintext re-flashing stays possible, so the pipeline can be validated on real hardware. | ✅ Yes (flashing workflow) |
+> | **3** | **Back out**<br>`CONFIG_SECURE_FLASH_ENC_ENABLED=n` | No eFuses burned, no encryption; behaves like upstream. | ✅ Yes |
+>
+> **Option 2 is the recommended path for the first device.** Options 1 and 2 both
+> burn `FLASH_CRYPT_CNT` on first boot, so the eFuse itself is never reversible —
+> "reversible" means you can keep re-flashing plaintext while developing.
+>
+> With Secure Boot, use `idf.py encrypted-flash` (not `idf.py flash`), otherwise the
+> device boot-loops with
+> `Flash encryption eFuse bit was not enabled in bootloader but CONFIG_SECURE_FLASH_ENC_ENABLED is on`.
+>
 > Upstream deliberately kept flash unencrypted to avoid forcing a migration on
 > existing users; this fork accepts that migration cost in exchange for
 > at-rest protection of the flash contents (including NVS).

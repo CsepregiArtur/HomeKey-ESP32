@@ -31,8 +31,19 @@ Version `0.10.0` (this fork) enables **flash encryption**, **Secure Boot V1** an
   ```
 
 * **Back up first.** Export the household recovery secret and note your configuration before upgrading.
+* **Flash with the encrypted path.** With Secure Boot enabled, `idf.py flash` writes a plaintext image and the app boot-loops with `Flash encryption eFuse bit was not enabled in bootloader but CONFIG_SECURE_FLASH_ENC_ENABLED is on`. Use `idf.py encrypted-flash` instead.
 
-See [Security](security#flash-encryption-secure-boot-and-nvs-encryption) for the full details.
+### Pick a mode before you flash
+
+| # | Option | What it does | Reversible? |
+| --- | --- | --- | --- |
+| **1** | **Release mode** — `CONFIG_SECURE_FLASH_ENCRYPTION_MODE_RELEASE=y` | Burns the eFuses, encrypts the flash, Secure Boot locks to your signing key. Encrypted + signed images only. | ❌ **Permanent** |
+| **2** | **Development mode** — `CONFIG_SECURE_FLASH_ENCRYPTION_MODE_DEVELOPMENT=y` | Same first-boot eFuse burn and in-place encryption, but plaintext re-flashing stays possible, so the pipeline can be validated on real hardware. | ✅ Yes (flashing workflow) |
+| **3** | **Back out** — `CONFIG_SECURE_FLASH_ENC_ENABLED=n` | No eFuses burned, no encryption; behaves like upstream. | ✅ Yes |
+
+**Use option 2 on the first device.** Options 1 and 2 both burn `FLASH_CRYPT_CNT`, so the eFuse itself is never reversible — "reversible" means you can keep re-flashing plaintext while developing.
+
+See [Security](security#choosing-how-to-enable-it-three-options) for the full details.
 
 **Required Files for Updates:**
 

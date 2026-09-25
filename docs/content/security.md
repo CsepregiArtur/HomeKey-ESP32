@@ -156,6 +156,67 @@ The original ESP32 only supports **Secure Boot V1**, which requires an **ECDSA-P
 >
 > Back up your household recovery secret and configuration before flashing.
 
+### Choosing how to enable it: three options
+
+Enabling this is a **one-time decision per device**, and the mode you pick decides
+how much freedom you keep. Pick deliberately — the eFuse burn cannot be undone.
+
+| # | Option | What it does | Reversible? |
+| --- | --- | --- | --- |
+| **1** | **Release mode**<br>`CONFIG_SECURE_FLASH_ENCRYPTION_MODE_RELEASE=y` | Burns the eFuses, encrypts the flash, and Secure Boot locks the device to your signing key. Encrypted + signed images only. | ❌ **Permanent** |
+| **2** | **Development mode**<br>`CONFIG_SECURE_FLASH_ENCRYPTION_MODE_DEVELOPMENT=y` | Same first-boot eFuse burn and in-place encryption, but plaintext re-flashing stays possible (ESP-IDF warns and re-encrypts). Lets you validate the encrypt → sign → flash pipeline on real hardware. | ✅ Yes (for the flashing workflow) |
+| **3** | **Back out**<br>`CONFIG_SECURE_FLASH_ENC_ENABLED=n` | No eFuses burned, no encryption. The device behaves like upstream and plaintext flashing works normally — but you lose all the at-rest protection. | ✅ Yes |
+
+```ini
+# Option 1 — production images
+CONFIG_SECURE_FLASH_ENC_ENABLED=y
+CONFIG_SECURE_FLASH_ENCRYPTION_MODE_RELEASE=y
+
+# Option 2 — validate the pipeline first (recommended for the first device)
+CONFIG_SECURE_FLASH_ENC_ENABLED=y
+CONFIG_SECURE_FLASH_ENCRYPTION_MODE_DEVELOPMENT=y
+
+# Option 3 — back out entirely, behave like upstream
+# CONFIG_SECURE_FLASH_ENC_ENABLED is not set
+```
+
+> [!WARNING]
+> **"Reversible" applies to the flashing workflow, not the eFuse.** Options 1 and 2
+> both burn `FLASH_CRYPT_CNT` on first boot, and that cannot be undone. Development
+> mode only means you can keep re-flashing **plaintext** images while developing,
+> instead of needing a signed+encrypted image every time. Switching from
+> development to release mode later does **not** re-enable plaintext flashing once
+> the eFuse is spent — the setting only controls what the build and flasher allow.
+>
+> Because of this, **Option 2 is the recommended path for the first device**: it
+> proves the whole pipeline works before you commit a fleet to release mode.
+
+#### Flashing with Secure Boot: a common pitfall
+
+`idf.py flash` writes a **plaintext** image. If the firmware was built with
+`CONFIG_SECURE_FLASH_ENC_ENABLED=y` on a device whose `FLASH_CRYPT_CNT` is still
+unset, the app aborts during startup:
+
+```
+E (682) flash_encrypt: Flash encryption eFuse bit was not enabled in bootloader
+but CONFIG_SECURE_FLASH_ENC_ENABLED is on
+abort() was called at PC ... esp_flash_encryption_init_checks
+```
+
+That is a **precondition check, not corruption** — the chip is fine and the eFuses
+are untouched. Confirm with:
+
+```bash
+espefuse.py -p /dev/cu.usbserial-0001 summary | grep -E "FLASH_CRYPT_CNT|ABS_DONE"
+# FLASH_CRYPT_CNT = 0b0000000   -> nothing burned yet
+```
+
+Then use the encrypted flashing path instead of the plain one:
+
+```bash
+idf.py -p /dev/cu.usbserial-0001 encrypted-flash
+```
+
 ## Physical access
 
 Flash encryption and Secure Boot protect the **secrets at rest** and the firmware integrity, but they do not make the device tamper-proof:

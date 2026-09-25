@@ -127,6 +127,28 @@ at-rest protection — which means:
 - Every future image must be signed with the same key. Generate it once and keep it
   safe, or the device can never be updated again.
 
+### Three ways to enable it
+
+Enabling is a one-time decision per device. The mode you choose decides how much
+freedom you keep — see
+[Choosing how to enable it](security#choosing-how-to-enable-it-three-options) for
+the full detail.
+
+| # | Option | What it does | Reversible? |
+| --- | --- | --- | --- |
+| **1** | **Release mode** — `CONFIG_SECURE_FLASH_ENCRYPTION_MODE_RELEASE=y` | Burns the eFuses, encrypts the flash, Secure Boot locks to your signing key. Encrypted + signed images only. | ❌ **Permanent** |
+| **2** | **Development mode** — `CONFIG_SECURE_FLASH_ENCRYPTION_MODE_DEVELOPMENT=y` | Same first-boot eFuse burn and in-place encryption, but plaintext re-flashing stays possible, so the pipeline can be validated on real hardware. | ✅ Yes (flashing workflow) |
+| **3** | **Back out** — `CONFIG_SECURE_FLASH_ENC_ENABLED=n` | No eFuses burned, no encryption; behaves like upstream. | ✅ Yes |
+
+**Option 2 is the recommended path for the first device.** Note that options 1 and 2
+both burn `FLASH_CRYPT_CNT` on first boot, so the eFuse itself is never reversible —
+"reversible" here means you can keep re-flashing plaintext images while developing.
+
+Using Secure Boot also changes how you flash: `idf.py flash` writes a plaintext image
+and will boot-loop with
+`Flash encryption eFuse bit was not enabled in bootloader but CONFIG_SECURE_FLASH_ENC_ENABLED is on`.
+Use `idf.py encrypted-flash` instead.
+
 See [Security](security#flash-encryption-secure-boot-and-nvs-encryption) and
 [Updates](updates).
 

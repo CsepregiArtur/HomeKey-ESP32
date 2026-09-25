@@ -25,6 +25,23 @@ updating.
   `espsecure.py generate_signing_key --version 1 keys/secure_boot_signing_key.pem`
   (the original ESP32 only supports Secure Boot V1, which needs an ECDSA-P256 key).
 * `keys/` and `*.pem` are now gitignored so the private key cannot be committed.
+* **Flash with `idf.py encrypted-flash`**, not `idf.py flash`. The plain path writes
+  a plaintext image and the app aborts with
+  `Flash encryption eFuse bit was not enabled in bootloader but CONFIG_SECURE_FLASH_ENC_ENABLED is on`.
+  The chip is not damaged; the eFuses are simply still unburned.
+
+**Enabling it is a one-time, per-device decision. Three options:**
+
+| # | Option | What it does | Reversible? |
+| --- | --- | --- | --- |
+| **1** | **Release mode** — `CONFIG_SECURE_FLASH_ENCRYPTION_MODE_RELEASE=y` | Burns the eFuses, encrypts the flash, Secure Boot locks to your signing key. Encrypted + signed images only. | ❌ **Permanent** |
+| **2** | **Development mode** — `CONFIG_SECURE_FLASH_ENCRYPTION_MODE_DEVELOPMENT=y` | Same first-boot eFuse burn and in-place encryption, but plaintext re-flashing stays possible, so the pipeline can be validated on real hardware. | ✅ Yes (flashing workflow) |
+| **3** | **Back out** — `CONFIG_SECURE_FLASH_ENC_ENABLED=n` | No eFuses burned, no encryption; behaves like upstream. | ✅ Yes |
+
+The default in `sdkconfig.defaults` is **option 2 (development mode)**; use option 1
+for production images. Options 1 and 2 both burn `FLASH_CRYPT_CNT` on first boot, so
+the eFuse itself is never reversible — see
+[Choosing how to enable it](docs/content/security.md#choosing-how-to-enable-it-three-options).
 
 ### Household & multi-node
 
