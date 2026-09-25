@@ -45,6 +45,13 @@
 					<span class="font-semibold">Recovery secret</span>
 					<span>{data.has_recovery_secret ? (data.recovery_exported ? 'stored (exported)' : 'stored (not exported yet)') : 'none'}</span>
 				</div>
+				<!-- The salt is public (it is a KDF input, not a key) and is shown because the
+				     household control key is derived from the secret *and* the salt together: a
+				     client given only the secret derives a key that can never match. -->
+				<div class="flex justify-between py-1">
+					<span class="font-semibold">Recovery salt</span>
+					<code class="text-xs">{data.recovery_salt || '—'}</code>
+				</div>
 				<div class="flex justify-between py-1">
 					<span class="font-semibold">Trust key</span>
 					<code class="text-xs">{data.trust_key || '—'}</code>

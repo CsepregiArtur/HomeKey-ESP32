@@ -3659,13 +3659,20 @@ esp_err_t WebServerManager::handleGetHousehold(httpd_req_t *req) {
         return sendJsonError(req, "Household manager unavailable", "503 Service Unavailable");
     }
     const auto &hh = instance->m_householdManager->info();
+    // The salt is reported because it is not a secret - it travels in the backup header and
+    // is a KDF input rather than a key - and because nothing else on the device exposes it.
+    // The household command key is BLAKE2b(recovery_secret || salt), so a client that can
+    // only obtain the secret derives a key that can never match, and authenticated lock
+    // control ends up impossible to configure rather than merely unconfigured.
     sendJsonStr(req, fmt::format(
         "{{\"household_id\":\"{}\",\"household_name\":\"{}\",\"state\":\"{}\",\"config_version\":{},"
-        "\"trust_key\":\"{}\",\"recovery_metadata\":\"{}\",\"has_recovery_secret\":{},"
-        "\"recovery_exported\":{}}}",
+        "\"trust_key\":\"{}\",\"recovery_metadata\":\"{}\",\"recovery_salt\":\"{}\","
+        "\"has_recovery_secret\":{},\"recovery_exported\":{}}}",
         hh.household_id, hh.household_name, household::householdStateToString(hh.state),
         hh.config_version, hexEncodeBytes(hh.trust_public_key),
-        hexEncodeBytes(hh.recovery_metadata), hh.has_recovery_secret ? "true" : "false",
+        hexEncodeBytes(hh.recovery_metadata),
+        hexEncodeBytes(instance->m_householdManager->recoverySalt()),
+        hh.has_recovery_secret ? "true" : "false",
         hh.recovery_exported ? "true" : "false"));
     return ESP_OK;
 }
@@ -4196,8 +4203,13 @@ esp_err_t WebServerManager::handleExportRecovery(httpd_req_t *req) {
     if (!instance->m_householdManager->exportRecoverySecretOnce(secret)) {
         return sendJsonError(req, "Recovery secret already exported or unavailable", "409 Conflict");
     }
-    sendJsonStr(req, fmt::format("{{\"success\":true,\"recovery_secret\":\"{}\"}}",
-                                 hexEncodeBytes(secret)));
+    // The salt goes with the secret, because the two are only useful together: the command
+    // key is BLAKE2b(secret || salt). This is the one moment the user has the secret in
+    // hand, so it is the moment to hand over everything needed to actually use it.
+    sendJsonStr(req, fmt::format(
+        "{{\"success\":true,\"recovery_secret\":\"{}\",\"recovery_salt\":\"{}\"}}",
+        hexEncodeBytes(secret),
+        hexEncodeBytes(instance->m_householdManager->recoverySalt())));
     return ESP_OK;
 }
 
