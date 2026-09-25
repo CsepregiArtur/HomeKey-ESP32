@@ -1,8 +1,5 @@
 CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
 CONFIG_BOOTLOADER_LOG_LEVEL_ERROR=y
-# Secure Boot pads the bootloader past the default 0x7000 limit; move the
-# partition table to 0xD000 to leave the signed bootloader enough room.
-CONFIG_PARTITION_TABLE_OFFSET=0xD000
 CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
 CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="with_ota.csv"
@@ -112,45 +109,26 @@ CONFIG_ESP_TIMER_IN_IRAM=y
 CONFIG_ESP_SYSTEM_IN_IRAM=y
 
 # ---------------------------------------------------------------------------
-# Flash encryption + Secure Boot V1 + NVS encryption (ENABLED)
+# Flash encryption + Secure Boot V1 + NVS encryption: DISABLED (Path 1)
 #
-# ⚠️  IRREVERSIBLE. These settings burn one-time eFuses and encrypt the flash on
-# first boot. Every already-deployed device must be re-flashed over serial and
-# re-provisioned: Wi-Fi credentials, HomeKit pairing and HomeKey reader
-# enrolment stored on the device are lost. See docs/content/security.md.
+# These features are intentionally OFF so the board stays fully reversible:
+# no one-time eFuses are burned and plaintext flashing keeps working. This is
+# the configuration used for day-to-day development and hardware validation.
+#
+# Path 2 (enabling them) is a ONE-WAY door and is documented, with the exact
+# procedure and its consequences, in docs/content/PATH2_SECURITY_ROLLOUT.md.
+# Do not enable anything below until that document's prerequisites are met.
 # ---------------------------------------------------------------------------
 
-# Encrypt the whole flash (firmware, NVS, LittleFS) with a per-device AES key.
-# The key lives in eFuse BLK1 and is never readable from software.
-CONFIG_SECURE_FLASH_ENC_ENABLED=y
-# DEVELOPMENT mode: the first boot still burns FLASH_CRYPT_CNT and encrypts the
-# flash, but plaintext re-flashing stays possible (ESP-IDF prints a warning and
-# re-encrypts). This lets the encrypt/sign/flash pipeline be validated on real
-# hardware before committing to RELEASE mode, which is permanent. Switch to
-# CONFIG_SECURE_FLASH_ENCRYPTION_MODE_RELEASE=y for production images — but note
-# that once the eFuse is burned, switching modes does NOT re-enable plaintext
-# flashing; the choice only affects what the build+flasher will let you do.
-CONFIG_SECURE_FLASH_ENCRYPTION_MODE_DEVELOPMENT=y
-# Allow the app to use the encrypted-NVS API (required by CONFIG_NVS_ENCRYPTION).
-CONFIG_SECURE_FLASH_ENC_USE_ENCRYPTED_NVS=y
+# CONFIG_SECURE_FLASH_ENC_ENABLED is not set
+# CONFIG_NVS_ENCRYPTION is not set
+# CONFIG_SECURE_BOOT is not set
+# CONFIG_SECURE_BOOT_V1_ENABLED is not set
+# CONFIG_SECURE_BOOT_BUILD_SIGNED_BINARIES is not set
 
-# Encrypt the NVS partition with a key stored in the `nvs_keys` partition.
-CONFIG_NVS_ENCRYPTION=y
-
-# Secure Boot V1: verify the bootloader and app signatures on every boot with an
-# ECDSA-P256 key burned (digest only) into eFuse BLK2. V1 is the only scheme the
-# original ESP32 supports; it does NOT use RSA (that is V2, ESP32-C3/S3 only).
-CONFIG_SECURE_BOOT=y
-CONFIG_SECURE_BOOT_V1_ENABLED=y
-CONFIG_SECURE_BOOT_BUILD_SIGNED_BINARIES=y
-# Build the bootloader with the digest only; do not revoke on a bad signature.
-CONFIG_SECURE_BOOTLOADER_ONE_TIME_FLASH=y
-
-# Secure-boot signing. The private key stays on the build machine and must be
-# generated once with:
-#   espsecure.py generate_signing_key --version 1 keys/secure_boot_signing_key.pem
-CONFIG_SECURE_BOOT_SIGNING_KEY="keys/secure_boot_signing_key.pem"
-# Sign on update as well as on boot.
-CONFIG_SECURE_SIGNED_ON_UPDATE_NO_SECURE_BOOT=y
+# Keys kept on disk for the eventual Path 2 rollout. Unused while the features
+# above are disabled.
+#   Secure Boot : keys/secure_boot_signing_key.pem  (ECDSA-P256, ESP32 V1)
+#   Flash enc.  : keys/flash_encryption_key.bin     (AES-256, backup off-machine)
 # ---------------------------------------------------------------------------
 
