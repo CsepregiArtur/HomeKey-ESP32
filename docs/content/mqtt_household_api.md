@@ -40,6 +40,7 @@ Legend: **dir** = PUB (node publishes) / SUB (node subscribes).
 | `.../backup/status` | PUB | yes | 0 | `completed` / `failed` | last backup outcome |
 | `.../backup/last` | PUB | yes | 0 | JSON | `{status, timestamp}` — metadata only, never backup contents |
 | `.../last_auth` | PUB | yes | 0 | JSON | `{type, result, timestamp}` — safe metadata only |
+| `.../lock/last` | PUB | yes | 0 | JSON | `{current, target, source, timestamp}` — what changed the lock |
 
 > [!NOTE]
 > `.../events` is **RESERVED / NOT IMPLEMENTED** (see below) and is not listed as
@@ -88,6 +89,34 @@ APDU, cryptographic material or HomeKey secrets):
 ```json
 {"type":"HomeKey","result":"SUCCESS","timestamp":1760000000}
 ```
+
+When the user has given a paired controller a name in the Web UI, that name is added as
+`issuer`:
+
+```json
+{"type":"HomeKey","result":"SUCCESS","timestamp":1760000000,"issuer":"Artur's iPhone"}
+```
+
+> [!IMPORTANT]
+> `issuer` is the **name the user typed**, never the issuer id. Naming a controller is what
+> opts it into being published; a device whose issuers are unnamed sends exactly what it
+> always did. The identifier is not derivable from the name, and no identifier is sent on
+> this topic either way.
+
+Example `.../lock/last` — what asked for the most recent lock change, so a client can
+report *who* opened the door rather than only that it opened. Published immediately
+*before* the state it explains:
+
+```json
+{"current":0,"target":0,"source":"homekit","timestamp":1760000000}
+```
+
+`source` is one of `homekit` (the Home app), `homekey` (a HomeKey credential presented at
+the reader), `mqtt` (a household command), `api` (the device's own HTTP API, including the
+Home Assistant direct transport), `device` (the physical switch or the node's own
+timer), or `unknown` when the node did not recognise the value. `current`/`target` use the
+same numbering as `lock_current`/`lock_target` in `.../health`, and are what ties this entry
+to a state change: a client must not apply a cause to a change it does not describe.
 
 ### Commands (security-critical — authoritative for HA V2)
 

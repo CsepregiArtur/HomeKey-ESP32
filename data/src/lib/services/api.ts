@@ -1,6 +1,35 @@
 import { type CertificatesStatus, type CertificateType, type MqttConfig, type MiscConfig, type ApiResponse, type ActionsConfig, type ApiError, type ApiSuccess, type CaptivePortalConfig, type WiFiNetwork, CertTypeString } from '../types/api';
 import { notifications } from '../stores/notifications.svelte.js';
 
+/**
+ * Name (or, with an empty name, un-name) a paired HomeKit controller.
+ *
+ * Resolves to true when the device stored the name, so the caller updates what it shows
+ * rather than assuming a success.
+ */
+export async function setIssuerName(issuerId: string, name: string): Promise<boolean> {
+  try {
+    const response = await fetch('/issuer/name', {
+      // POST: this changes stored state, so it must not be reachable from a link or an
+      // <img> tag on a page the user happens to visit.
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ issuerId, name }),
+    });
+    const result = await response.json().catch(() => null);
+    if (!response.ok || !result?.success) {
+      notifications.addError(result?.error || 'Failed to save the name');
+      return false;
+    }
+    notifications.addSuccess(name ? 'Name saved' : 'Name cleared');
+    return true;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown error occurred';
+    notifications.addError(`Failed to save the name: ${message}`);
+    return false;
+  }
+}
+
 export async function rebootDevice() {
   try {
     const response = await fetch(`/reboot_device`, {

@@ -11,6 +11,13 @@ export interface HKInfo {
   issuers: Array<{
     /** Unique identifier for the issuer */
     issuerId: string;
+    /**
+     * Name the user gave this issuer, empty when unnamed.
+     *
+     * A HomeKit controller is never named for us: HAP only ever exposes a pairing id
+     * and a public key, so anything readable here was typed by a person.
+     */
+    name: string;
     /** Array of endpoints for this issuer */
     endpoints: Array<{
       /** Unique identifier for the endpoint */

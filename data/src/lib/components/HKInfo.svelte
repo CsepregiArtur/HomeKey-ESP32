@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { HKInfo } from "$lib/types/api";
+  import { setIssuerName } from "$lib/services/api";
   import { systemInfo } from "$lib/stores/system.svelte.js";
   import { calculateWifiSignal } from "$lib/utils/wifi.js";
   const version: string = __DEV__ ? "dev" : __VERSION__;
@@ -9,6 +10,25 @@
 
   let wifi_rssi = $derived(systemInfo?.wifi_rssi);
   let wifi_signal = $derived.by(() => calculateWifiSignal(wifi_rssi));
+
+  // Names live on the device; this only holds the ones changed in this session, so a
+  // rename is visible immediately rather than after a reload. The device stays the
+  // source of truth - revisiting the page re-reads it.
+  let labels = $state<Record<string, string>>({});
+  let editingId = $state<string | null>(null);
+  let draft = $state("");
+
+  function label(issuer: HKInfo["issuers"][number]): string {
+    return labels[issuer.issuerId] ?? issuer.name ?? "";
+  }
+
+  async function save(issuerId: string) {
+    const name = draft.trim();
+    if (await setIssuerName(issuerId, name)) {
+      labels[issuerId] = name;
+      editingId = null;
+    }
+  }
 </script>
 
 <div class="w-full py-6">
@@ -71,9 +91,49 @@
                   <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-base-content/60" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
                   </svg>
-                  <span>Issuer {index + 1}</span>
+                  <span>{label(issuer) || `Issuer ${index + 1}`}</span>
                 </div>
                 <div class="collapse-content text-sm">
+                  <!-- Naming a controller is the only way to tell them apart: HomeKit
+                       hands over an opaque pairing id and nothing resembling a name. -->
+                  <div class="py-2 px-3 bg-base-200 rounded-lg mb-2">
+                    <span class="text-xs text-base-content/60 block mb-1">Name</span>
+                    {#if editingId === issuer.issuerId}
+                      <div class="flex items-center gap-2">
+                        <input
+                          class="input input-sm input-bordered flex-1"
+                          maxlength="64"
+                          placeholder="e.g. Artur's iPhone"
+                          bind:value={draft}
+                        />
+                        <button
+                          class="btn btn-sm btn-primary"
+                          onclick={() => save(issuer.issuerId)}
+                        >
+                          Save
+                        </button>
+                        <button class="btn btn-sm" onclick={() => (editingId = null)}>
+                          Cancel
+                        </button>
+                      </div>
+                      <span class="text-xs text-base-content/50 block mt-1">
+                        Up to 64 characters. Clearing the box removes the name.
+                      </span>
+                    {:else}
+                      <div class="flex items-center gap-2">
+                        <span class="text-sm flex-1">{label(issuer) || "Unnamed"}</span>
+                        <button
+                          class="btn btn-sm"
+                          onclick={() => {
+                            editingId = issuer.issuerId;
+                            draft = label(issuer);
+                          }}
+                        >
+                          {label(issuer) ? "Rename" : "Name"}
+                        </button>
+                      </div>
+                    {/if}
+                  </div>
                   <div class="py-2 px-3 bg-base-200 rounded-lg mb-2">
                     <span class="text-xs text-base-content/60 block mb-1">Issuer ID</span>
                     <span class="text-sm font-mono break-all">{issuer.issuerId || "N/A"}</span>

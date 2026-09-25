@@ -12,6 +12,7 @@ class HouseholdManager;
 class NodeIdentityManager;
 class HealthManager;
 class AuditManager;
+class NvsCredentialStore;
 namespace espConfig { struct mqttConfig_t; struct mqtt_ssl_t;}
 
 /**
@@ -73,13 +74,32 @@ public:
     void setNodeIdentityManager(NodeIdentityManager *node) { m_node = node; }
     void setHealthManager(HealthManager *health) { m_health = health; }
     void setAuditManager(AuditManager *audit) { m_audit = audit; }
+    /// Enables reporting the name a user gave a paired controller (see ReaderDataManager).
+    void setReaderDataManager(NvsCredentialStore *reader) { m_readerData = reader; }
 
     /// Publish node state + health to homekey/household/<hid>/nodes/<nid>/...
     void publishNodeStatus();
     void publishBackupStatus(const std::string &status);
+    /**
+     * @brief Publish safe last-authentication metadata (type/result/timestamp).
+     *
+     * ``issuerLabel`` is the name the user gave a paired controller, and is only sent
+     * when they gave it one: naming an issuer is what opts it into being published, and
+     * the underlying issuer id is never sent either way. Safe metadata only - no
+     * credential identifiers, raw APDU, or key material.
+     */
+    void publishLastAuth(const std::string &authType, const std::string &result,
+                         const std::string &issuerLabel = "");
 
-    /// Publish safe last-authentication metadata (type/result/timestamp only).
-    void publishLastAuth(const std::string &authType, const std::string &result);
+    /**
+     * @brief Publish the origin of a lock change on the household lock topic.
+     *
+     * Answers "who did that?" for the change that produced the current state. Kept
+     * separate from the state publication because a state is a property and an origin
+     * is an event: publishing them together would mean re-announcing an old cause.
+     */
+    void publishLockChange(const int currentState, const int targetState,
+                           const uint8_t source);
 
 private:
     /**
@@ -153,6 +173,7 @@ private:
     NodeIdentityManager *m_node = nullptr;
     HealthManager *m_health = nullptr;
     AuditManager *m_audit = nullptr;
+    NvsCredentialStore *m_readerData = nullptr;
     std::deque<std::string> m_seenNonces;  ///< bounded replay protection
 };
 

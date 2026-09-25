@@ -24,6 +24,8 @@
 #include "ProvisioningManager.hpp"
 #include "BackupManager.hpp"
 #include "RestoreManager.hpp"
+#include "LockManager.hpp"
+#include "DeviceCert.hpp"
 #include "cJSON.h"
 // Must come after the Arduino headers. Arduino's IPAddress.h expands lwip's
 // INADDR_NONE (which is IPADDR_NONE, i.e. `((u32_t)0xffffffffUL)`), so if lwip is
@@ -285,12 +287,11 @@ void WebServerManager::begin() {
   // the table is silently dropped: httpd_register_uri_handler logs "no slots left" and
   // the handler never exists. That used to leave the catch-all `{"/*"}` unregistered,
   // so every unmatched URL returned "Nothing matches the given URI" (404) - including
-  // the Web UI root and the captive-portal redirect.
-  //
-  // setupRoutes() registers 28 handlers; setupCaptivePortalRoutes() registers 10. Both
+  // the Web UI root and the captive-portal redirect.  //
+  // setupRoutes() registers 34 handlers; setupCaptivePortalRoutes() registers 10. Both
   // tables can end up on the same server across an AP/STA transition, so size for the
   // sum with headroom rather than for either table alone.
-  ssl_config.httpd.max_uri_handlers = 48;
+  ssl_config.httpd.max_uri_handlers = 56;
   ssl_config.httpd.max_open_sockets = 4;
   ssl_config.httpd.stack_size = 6144;
   ssl_config.httpd.uri_match_fn = httpd_uri_match_wildcard;
@@ -320,20 +321,36 @@ void WebServerManager::begin() {
     } else ESP_LOGI(TAG, "No user HTTPS certificates found");
   }
 
+  // httpd_ssl_start() sets httpd.server_port from port_secure or port_insecure depending
+  // on transport_mode, so read it back afterwards rather than assuming 443/80.
   if (httpd_ssl_start(&m_server, &ssl_config) == ESP_OK) {
-    ESP_LOGI(TAG, "HTTP server started, free heap: %zu", esp_get_free_heap_size());
+    m_tlsActive.store(isHttpsActive);
+    m_serverPort.store(ssl_config.httpd.server_port);
+    ESP_LOGI(TAG, "HTTP server started on port %u, free heap: %zu",
+             static_cast<unsigned>(ssl_config.httpd.server_port), esp_get_free_heap_size());
   } else {
     ESP_LOGE(TAG, "Failed to start HTTP server");
+    // Keeping the Web UI reachable for a human is worth the downgrade, but the API is
+    // then unencrypted. isTlsActive() reports that so callers can refuse to use it.
     ssl_config.transport_mode = HTTPD_SSL_TRANSPORT_INSECURE;
     if (httpd_ssl_start(&m_server, &ssl_config) == ESP_OK) {
-      ESP_LOGI(TAG, "HTTP server started (INSECURE)");
+      m_tlsActive.store(false);
+      m_serverPort.store(ssl_config.httpd.server_port);
+      ESP_LOGW(TAG, "HTTP server started (INSECURE) on port %u",
+               static_cast<unsigned>(ssl_config.httpd.server_port));
     } else {
       ESP_LOGE(TAG, "Failed to start HTTP server in INSECURE mode as well!");
       return;
     }
   }
-  m_wsQueue = xQueueCreate(64, sizeof(WsFrame *));
-  if (!m_wsQueue) {
+  // With TLS active the main server only listens on 443, so a plain http:// address to the
+  // device stops working altogether. Keep port 80 open purely to send those clients to the
+  // right place, which is what makes enabling HTTPS non-breaking for bookmarks.
+  if (m_tlsActive.load(std::memory_order_relaxed)) {
+    startHttpsRedirectServer();
+  }
+
+  m_wsQueue = xQueueCreate(64, sizeof(WsFrame *));  if (!m_wsQueue) {
     ESP_LOGE(TAG, "Failed to create WebSocket queue");
     httpd_stop(m_server);
     m_server = nullptr;
@@ -387,6 +404,15 @@ void WebServerManager::end() {
     httpd_ssl_stop(m_server);
     ESP_LOGI(TAG, "HTTP Server stopped!");
     m_server = nullptr;
+    // Nothing is listening any more, so stop reporting a port and a transport that no
+    // longer exist - anything advertising this API would otherwise point at a dead port.
+    m_serverPort.store(0);
+    m_tlsActive.store(false);
+  }
+
+  if (m_redirectServer) {
+    httpd_stop(m_redirectServer);
+    m_redirectServer = nullptr;
   }
 
   if (m_wsTaskHandle) {
@@ -721,6 +747,9 @@ void WebServerManager::setupRoutes() {
       // Household / node / backup / recovery / provisioning endpoints
       {"/household", HTTP_GET, handleGetHousehold, this},
       {"/node", HTTP_GET, handleGetNode, this},
+      // Names a paired HomeKit controller. POST-only: it is a state change, and a GET
+      // could be triggered by any page the user happens to visit.
+      {"/issuer/name", HTTP_POST, handleSetIssuerName, this},
       {"/health", HTTP_GET, handleGetHealth, this},
       {"/security", HTTP_GET, handleGetSecurity, this},
       {"/audit", HTTP_GET, handleGetAudit, this},
@@ -730,6 +759,16 @@ void WebServerManager::setupRoutes() {
       {"/recovery/export", HTTP_POST, handleExportRecovery, this},
       {"/provision/issue", HTTP_POST, handleIssueProvisioning, this},
       {"/provision/join", HTTP_POST, handleJoinHousehold, this},
+
+      // Home Assistant direct API. Kept under /api/ so it can never collide with a Web
+      // UI page name, and registered before the catch-all.
+      {"/api/ha/info", HTTP_GET, handleHaInfo, this},
+      {"/api/ha/state", HTTP_GET, handleHaState, this},
+      {"/api/ha/config", HTTP_GET, handleHaConfig, this},
+      {"/api/ha/config", HTTP_POST, handleHaConfig, this},
+      // POST-only: a state change reachable by simply visiting a URL could be driven by
+      // any page the user happens to have open.
+      {"/api/ha/lock", HTTP_POST, handleHaLock, this},
 
       // Catch-all (must be last)
       {"/*", HTTP_GET, handleRootOrHash, this}};
@@ -1008,6 +1047,11 @@ esp_err_t WebServerManager::handleGetConfig(httpd_req_t *req) {
     for (const auto &issuer : readerData.issuers) {
       JsonGuard issuerJson(cJSON_CreateObject());
       cJSON_AddStringToObject(issuerJson.get(), "issuerId", fmt::format("{:02X}", fmt::join(issuer.id, "")).c_str());
+      // Always present, empty when unnamed: a stable shape is easier for a client than
+      // a field that appears only sometimes, and an empty string says "the user has not
+      // named this" rather than inventing a placeholder.
+      cJSON_AddStringToObject(issuerJson.get(), "name",
+                              instance->m_readerDataManager.issuerLabel(issuer.id).c_str());
       
       JsonGuard endpointsArray(cJSON_CreateArray());
       for (const auto &endpoint : issuer.endpoints) {
@@ -2599,8 +2643,24 @@ bool httpGetToString(const std::string &url, std::string &out, std::string &err)
   esp_http_client_set_header(client, "User-Agent", "HomeKey-ESP32");
   esp_http_client_set_header(client, "Accept", "application/vnd.github+json");
 
-  if (esp_http_client_open(client, 0) != ESP_OK) {
-    err = "Could not reach GitHub";
+  // A TLS client connection needs tens of KB, and it is attempted while the HTTPS server
+  // may be holding a TLS context per socket and HomeKit/MQTT are running. Checked up front
+  // so the likely cause is named instead of surfacing as a generic connect failure.
+  const size_t freeBefore = esp_get_free_heap_size();
+  if (freeBefore < HEAP_LOWER_THRESHOLD) {
+    err = fmt::format("Not enough free memory ({} bytes) to open a TLS connection",
+                      freeBefore);
+    esp_http_client_cleanup(client);
+    return false;
+  }
+
+  const esp_err_t openErr = esp_http_client_open(client, 0);
+  if (openErr != ESP_OK) {
+    // Include the actual reason and the heap at the time: without them this is
+    // indistinguishable between "no internet", "DNS failed", "TLS refused" and "ran out
+    // of memory", which are four very different problems.
+    err = fmt::format("Could not reach GitHub: {} (free memory {} bytes)",
+                      esp_err_to_name(openErr), esp_get_free_heap_size());
     esp_http_client_cleanup(client);
     return false;
   }
@@ -3533,10 +3593,37 @@ void sendJsonStr(httpd_req_t *req, const std::string &body, const char *status =
     httpd_resp_sendstr(req, body.c_str());
 }
 
+/**
+ * @brief Whether this request is a browser navigating rather than an API client calling.
+ *
+ * Six API paths - household, node, health, security, audit and backup - are also Web UI
+ * page names. Handlers are matched before the catch-all, so without this check loading,
+ * reloading or bookmarking those pages returned raw JSON instead of the app: the UI only
+ * worked when reached by clicking a link inside the already-loaded app, because that never
+ * asks the server.
+ *
+ * The distinguisher is the Accept header. Browsers send "text/html,..."; API clients send
+ * "application/json", or the wildcard that curl and python-requests send, which must stay
+ * JSON so that scripted access to these endpoints keeps working.
+ */
+bool wantsHtml(httpd_req_t *req) {
+  size_t len = httpd_req_get_hdr_value_len(req, "Accept");
+  if (len == 0 || len >= 128) {
+    return false;
+  }
+  char buf[128];
+  if (httpd_req_get_hdr_value_str(req, "Accept", buf, sizeof(buf)) != ESP_OK) {
+    return false;
+  }
+  return std::string(buf).find("text/html") != std::string::npos;
+}
+
 } // namespace
 
 esp_err_t WebServerManager::handleGetHousehold(httpd_req_t *req) {
     WebServerManager *instance = getInstance(req);
+    // See wantsHtml(): `/household` is both this endpoint and a Web UI page.
+    if (wantsHtml(req)) return handleRootOrHash(req);
     if (!instance->basicAuth(req)) return sendAuthFailure(req);
     if (!instance->m_householdManager) {
         return sendJsonError(req, "Household manager unavailable", "503 Service Unavailable");
@@ -3555,6 +3642,8 @@ esp_err_t WebServerManager::handleGetHousehold(httpd_req_t *req) {
 
 esp_err_t WebServerManager::handleGetNode(httpd_req_t *req) {
     WebServerManager *instance = getInstance(req);
+    // See wantsHtml(): `/node` is both this endpoint and a Web UI page.
+    if (wantsHtml(req)) return handleRootOrHash(req);
     if (!instance->basicAuth(req)) return sendAuthFailure(req);
     if (!instance->m_nodeIdentityManager) {
         return sendJsonError(req, "Node manager unavailable", "503 Service Unavailable");
@@ -3572,6 +3661,8 @@ esp_err_t WebServerManager::handleGetNode(httpd_req_t *req) {
 
 esp_err_t WebServerManager::handleGetHealth(httpd_req_t *req) {
     WebServerManager *instance = getInstance(req);
+    // See wantsHtml(): `/health` is both this endpoint and a Web UI page.
+    if (wantsHtml(req)) return handleRootOrHash(req);
     if (!instance->basicAuth(req)) return sendAuthFailure(req);
     if (!instance->m_healthManager) {
         return sendJsonError(req, "Health manager unavailable", "503 Service Unavailable");
@@ -3582,6 +3673,8 @@ esp_err_t WebServerManager::handleGetHealth(httpd_req_t *req) {
 
 esp_err_t WebServerManager::handleGetSecurity(httpd_req_t *req) {
     WebServerManager *instance = getInstance(req);
+    // See wantsHtml(): `/security` is both this endpoint and a Web UI page.
+    if (wantsHtml(req)) return handleRootOrHash(req);
     if (!instance->basicAuth(req)) return sendAuthFailure(req);
     if (!instance->m_securityManager) {
         return sendJsonError(req, "Security manager unavailable", "503 Service Unavailable");
@@ -3592,6 +3685,8 @@ esp_err_t WebServerManager::handleGetSecurity(httpd_req_t *req) {
 
 esp_err_t WebServerManager::handleGetAudit(httpd_req_t *req) {
     WebServerManager *instance = getInstance(req);
+    // See wantsHtml(): `/audit` is both this endpoint and a Web UI page.
+    if (wantsHtml(req)) return handleRootOrHash(req);
     if (!instance->basicAuth(req)) return sendAuthFailure(req);
     if (!instance->m_auditManager) {
         return sendJsonError(req, "Audit manager unavailable", "503 Service Unavailable");
@@ -3602,6 +3697,8 @@ esp_err_t WebServerManager::handleGetAudit(httpd_req_t *req) {
 
 esp_err_t WebServerManager::handleGetBackup(httpd_req_t *req) {
     WebServerManager *instance = getInstance(req);
+    // See wantsHtml(): `/backup` is both this endpoint and a Web UI page.
+    if (wantsHtml(req)) return handleRootOrHash(req);
     if (!instance->basicAuth(req)) return sendAuthFailure(req);
     if (!instance->m_backupManager) {
         return sendJsonError(req, "Backup manager unavailable", "503 Service Unavailable");
@@ -3610,6 +3707,404 @@ esp_err_t WebServerManager::handleGetBackup(httpd_req_t *req) {
                                  instance->m_backupManager->lastBackupTime(),
                                  hexEncodeBytes(instance->m_backupManager->lastBackupHash())));
     return ESP_OK;
+}
+
+esp_err_t WebServerManager::handleSetIssuerName(httpd_req_t *req) {
+  WebServerManager *instance = getInstance(req);
+  if (!instance->basicAuth(req)) return sendAuthFailure(req);
+
+  // A bounded body: this endpoint carries an id and a short name and nothing else.
+  char buf[256];
+  const int received = httpd_req_recv(req, buf, sizeof(buf) - 1);
+  if (received <= 0) {
+    return sendJsonError(req, "Empty request body", "400 Bad Request");
+  }
+  buf[received] = '\0';
+
+  cJSON *root = cJSON_Parse(buf);
+  if (!root) {
+    return sendJsonError(req, "Invalid JSON", "400 Bad Request");
+  }
+  const cJSON *idNode = cJSON_GetObjectItemCaseSensitive(root, "issuerId");
+  const cJSON *nameNode = cJSON_GetObjectItemCaseSensitive(root, "name");
+  const bool shaped = cJSON_IsString(idNode) && idNode->valuestring != nullptr &&
+                      (nameNode == nullptr || cJSON_IsString(nameNode));
+  const std::string issuerIdHex = shaped ? idNode->valuestring : "";
+  // An absent or empty name clears the label. Clearing has to be possible, and an empty
+  // box in a form must mean "clear" rather than silently doing nothing - a no-op that
+  // looks like a save is worse than an explicit removal.
+  const std::string label =
+      shaped && nameNode != nullptr && nameNode->valuestring != nullptr
+          ? nameNode->valuestring
+          : "";
+  cJSON_Delete(root);
+
+  if (!shaped) {
+    return sendJsonError(req, "Expected {\"issuerId\":\"<hex>\",\"name\":\"...\"}",
+                         "400 Bad Request");
+  }
+
+  const std::vector<uint8_t> issuerId = hexDecodeBytes(issuerIdHex);
+  const auto readerData = instance->m_readerDataManager.snapshot();
+  const bool known =
+      std::any_of(readerData.issuers.begin(), readerData.issuers.end(),
+                  [&issuerId](const ddk::Issuer &issuer) {
+                    return issuer.id.size() == issuerId.size() &&
+                           std::equal(issuer.id.begin(), issuer.id.end(),
+                                      issuerId.begin());
+                  });
+  if (!known) {
+    // Refused rather than stored: a label for a pairing that does not exist would never
+    // be shown, and a mistyped id would look like it had worked.
+    return sendJsonError(req, "Unknown issuer", "404 Not Found");
+  }
+
+  if (!instance->m_readerDataManager.setIssuerLabel(issuerId, label)) {
+    return sendJsonError(req, "Name is not acceptable (max 64 characters, printable)",
+                         "400 Bad Request");
+  }
+  instance->m_readerDataManager.save();
+  ESP_LOGI(TAG, "Issuer label %s", label.empty() ? "cleared" : "set");
+  sendJsonStr(req, "{\"success\":true}");
+  return ESP_OK;
+}
+
+// ============================================================================
+// Home Assistant direct API (/api/ha/*)
+//
+// A second way into the same data as the Web UI, for a client that has neither a
+// broker nor a browser. See HA_INTEGRATION_PLAN.md.
+// ============================================================================
+
+namespace {
+
+/// Bumped only when a client would misread a response, so the component can refuse a
+/// device it does not understand rather than guess at it.
+constexpr int kHaProtocolVersion = 1;
+
+/// Translate the health manager's internal backup wording to the documented one.
+///
+/// ``HealthManager`` records a successful backup as ``"ok"`` while the household
+/// contract (and the value published on ``B/backup/status``) is ``"completed"``. Both
+/// describe the same event, so the API boundary normalises instead of emitting a value
+/// the contract does not define - a client validating strictly against the contract
+/// would otherwise reject it.
+std::string documentedBackupStatus(const std::string &healthStatus) {
+  return healthStatus == "ok" ? "completed" : healthStatus;
+}
+
+/// Find the most recent HomeKey authentication in the audit log.
+///
+/// Read from the audit log rather than a dedicated field because that is where the
+/// firmware already records exactly this event. Scanning for the highest sequence
+/// number avoids assuming an iteration order for the ring buffer.
+bool lastHomeKeyAuth(const AuditManager &audit, uint32_t &timestampOut, bool &successOut) {
+  bool found = false;
+  uint32_t bestSeq = 0;
+  for (const auto &record : audit.records()) {
+    const bool isAuth = record.event_type == AuditManager::HOMEKEY_AUTH_SUCCESS ||
+                        record.event_type == AuditManager::HOMEKEY_AUTH_FAILURE;
+    if (!isAuth) continue;
+    if (found && record.seq <= bestSeq) continue;
+    found = true;
+    bestSeq = record.seq;
+    timestampOut = record.timestamp;
+    successOut = record.event_type == AuditManager::HOMEKEY_AUTH_SUCCESS;
+  }
+  return found;
+}
+
+/// Name a ``LockManager`` state for a client that should not have to hard-code the
+/// firmware's numeric enum. The spelling matches the household contract's lock-state
+/// vocabulary, so a client can use one set of names for every transport.
+const char *lockStateToName(int state) {
+  switch (state) {
+    case LockManager::UNLOCKED: return "unlocked";
+    case LockManager::LOCKED: return "locked";
+    case LockManager::JAMMED: return "jammed";
+    case LockManager::UNLOCKING: return "unlocking";
+    case LockManager::LOCKING: return "locking";
+    default: return "unknown";
+  }
+}
+
+} // namespace
+
+bool WebServerManager::haRequireTls(httpd_req_t *req) const {
+  if (m_tlsActive.load(std::memory_order_relaxed)) {
+    return true;
+  }
+  sendJsonError(req,
+                "HTTPS is not active on this device, so this data would be sent in the "
+                "clear. Enable HTTPS under Misc -> Security and retry over https.",
+                "503 Service Unavailable");
+  return false;
+}
+
+void WebServerManager::startHttpsRedirectServer() {
+  if (m_redirectServer != nullptr) {
+    return;
+  }
+
+  httpd_config_t config = HTTPD_DEFAULT_CONFIG();
+  config.server_port = 80;
+  // One catch-all is all this needs, and only two sockets: a redirect is cheap to serve
+  // and the client leaves immediately.
+  config.max_uri_handlers = 2;
+  config.max_open_sockets = 2;
+  config.stack_size = 4096;
+  config.lru_purge_enable = true;
+  config.uri_match_fn = httpd_uri_match_wildcard;
+
+  if (httpd_start(&m_redirectServer, &config) != ESP_OK) {
+    ESP_LOGW(TAG, "Could not listen on port 80; reach the Web UI with https:// directly");
+    m_redirectServer = nullptr;
+    return;
+  }
+
+  httpd_uri_t redirect = {.uri = "/*",
+                          .method = HTTP_GET,
+                          .handler = handleHttpRedirect,
+                          .user_ctx = nullptr};
+  if (httpd_register_uri_handler(m_redirectServer, &redirect) != ESP_OK) {
+    ESP_LOGW(TAG, "Could not register the HTTP redirect handler");
+    httpd_stop(m_redirectServer);
+    m_redirectServer = nullptr;
+    return;
+  }
+  ESP_LOGI(TAG, "Port 80 redirects to https:// so existing addresses keep working");
+}
+
+esp_err_t WebServerManager::handleHttpRedirect(httpd_req_t *req) {
+  // Only reachable while TLS is active, so the target scheme is always https.
+  std::string targetHost;
+
+  char host[128] = {0};
+  if (httpd_req_get_hdr_value_str(req, "Host", host, sizeof(host)) == ESP_OK &&
+      host[0] != '\0') {
+    std::string candidate(host);
+    const size_t colon = candidate.find(':');
+    if (colon != std::string::npos) {
+      candidate.erase(colon);
+    }
+    // Accept only a bare hostname or IPv4 literal. Anything else - a slash, an @, a
+    // space - could turn this into an open redirect, so it is rejected and the device's
+    // own address is used instead.
+    const size_t bad = candidate.find_first_not_of(
+        "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-");
+    if (!candidate.empty() && bad == std::string::npos) {
+      targetHost = candidate;
+    }
+  }
+
+  if (targetHost.empty()) {
+    // The Arduino String must outlive the c_str() call, hence the named local.
+    const String localAddress = WiFi.localIP().toString();
+    targetHost = localAddress.c_str();
+  }
+
+  const std::string location = fmt::format("https://{}{}", targetHost, req->uri);
+  httpd_resp_set_status(req, "301 Moved Permanently");
+  httpd_resp_set_hdr(req, "Location", location.c_str());
+  // A redirect has no body worth sending.
+  httpd_resp_send(req, nullptr, 0);
+  return ESP_OK;
+}
+
+esp_err_t WebServerManager::handleHaInfo(httpd_req_t *req) {
+  WebServerManager *instance = getInstance(req);
+
+  // Not authenticated, and deliberately so: this is the request a client makes to learn
+  // the fingerprint it is about to ask its user to confirm, and it cannot ask for a
+  // password before knowing what it is talking to. Nothing here is new information -
+  // every field below is already broadcast in the mDNS TXT record, which is equally
+  // public on the LAN.
+  const auto &misc = instance->m_configManager.getConfig<espConfig::misc_config_t>();
+  const auto &certs = instance->m_configManager.getHttpsCertsConfig();
+  const std::string fingerprint = deviceCert::certificateFingerprint(certs.serverCert);
+  const bool tls = instance->isTlsActive();
+
+  JsonBuilder info = JsonBuilder::object();
+  info.addNumber("protocol", kHaProtocolVersion);
+  info.addString("transport", tls ? "tls" : "plaintext");
+  info.addBool("secure", tls);
+  info.addNumber("port", instance->getServerPort());
+  info.addString("fingerprint", fingerprint);
+  info.addBool("setup_completed", misc.setupCompleted);
+  info.withObject("device", [&](JsonBuilder &d) {
+    d.addString("name", misc.deviceName);
+    d.addString("model", "HomeKey-ESP32");
+    d.addString("firmware", esp_app_get_description()->version);
+    // Arduino's String, not const char*, so it needs converting for the builder.
+    const String macAddress = WiFi.macAddress();
+    d.addString("mac", macAddress.c_str());
+    if (instance->m_nodeIdentityManager) {
+      d.addString("node_id", instance->m_nodeIdentityManager->info().node_id);
+      d.addString("node_name", instance->m_nodeIdentityManager->info().node_name);
+    }
+  });
+  // The household id is deliberately not exposed here even when one exists: it is not in
+  // the mDNS TXT record, and it forms part of the MQTT topic path, so publishing it
+  // unauthenticated would hand out more than discovery already does.
+  info.withObject("capabilities", [](JsonBuilder &c) {
+    c.addBool("read_state", true);
+    c.addBool("write_config", true);
+    c.addBool("lock_control", true);
+  });
+
+  sendJsonStr(req, info.toStringUnformatted());
+  return ESP_OK;
+}
+
+esp_err_t WebServerManager::handleHaState(httpd_req_t *req) {
+  WebServerManager *instance = getInstance(req);
+  if (!instance->basicAuth(req)) return sendAuthFailure(req);
+  if (!instance->haRequireTls(req)) return ESP_OK;
+
+  JsonBuilder state = JsonBuilder::object();
+  state.addNumber("protocol", kHaProtocolVersion);
+  state.addString("firmware", esp_app_get_description()->version);
+
+  // Identity. Present here and deliberately absent from /api/ha/info: the household id
+  // forms part of the MQTT topic path, and /api/ha/info is unauthenticated so that a
+  // client can read the fingerprint before it has anything to authenticate with. A client
+  // that reaches this endpoint has already authenticated.
+  if (instance->m_householdManager) {
+    const auto &hh = instance->m_householdManager->info();
+    state.addString("household_id", hh.household_id);
+    state.addString("household_name", hh.household_name);
+    state.addString("household_state", household::householdStateToString(hh.state));
+    state.addNumber("config_version", hh.config_version);
+  }
+  if (instance->m_nodeIdentityManager) {
+    const auto &nd = instance->m_nodeIdentityManager->info();
+    state.addString("node_id", nd.node_id);
+    state.addString("node_name", nd.node_name);
+    state.addString("node_role", household::nodeRoleToString(nd.node_role));
+    state.addString("node_state", household::nodeStateToString(nd.state));
+    state.addNumber("generation", nd.generation);
+  }
+
+  state.withObject("wifi", [](JsonBuilder &w) {
+    w.addBool("connected", WiFi.status() == WL_CONNECTED);
+    w.addNumber("rssi", WiFi.RSSI());
+  });
+
+  if (instance->m_healthManager) {
+    const HealthManager::Snapshot snapshot = instance->m_healthManager->snapshot();
+    // The health payload is embedded verbatim - the same JSON the household MQTT transport
+    // publishes on ``B/health``. Sending the identical document is the point: a client
+    // cannot interpret one transport's health differently from the other's, because there
+    // is only one implementation of it.
+    if (auto health = parse_json(instance->m_healthManager->toJson(snapshot))) {
+      state.addItem("health", std::move(*health));
+    } else {
+      ESP_LOGW(TAG, "Could not embed the health payload in /api/ha/state");
+    }
+    // The compact security state, exactly as ``B/security`` publishes it: OK or WARNING,
+    // never a numeric score.
+    state.addString("security", snapshot.security_all_ok ? "OK" : "WARNING");
+    state.addString("backup_status", documentedBackupStatus(snapshot.backup_status));
+  }
+
+  // The origin of the most recent lock change, so a client can report *who* opened the
+  // door rather than only that it opened. Reported alongside the health document
+  // because it explains the lock state that document carries. No timestamp: this
+  // response is a snapshot, so every field in it is current by construction, and the
+  // push transport is the one that has to say when.
+  if (instance->m_lockManager != nullptr) {
+    state.withObject("lock_last", [&](JsonBuilder &l) {
+      l.addNumber("current", instance->m_lockManager->getCurrentState());
+      l.addNumber("target", instance->m_lockManager->getTargetState());
+      l.addString("source",
+                  LockManager::sourceName(static_cast<uint8_t>(
+                      instance->m_lockManager->lastChangeSource())));
+    });
+  }
+
+  // Omitted entirely when no HomeKey authentication has ever been recorded, so a client
+  // sees "never" rather than a fabricated success at time zero.
+  if (instance->m_auditManager) {
+    uint32_t authTimestamp = 0;
+    bool authSuccess = false;
+    if (lastHomeKeyAuth(*instance->m_auditManager, authTimestamp, authSuccess)) {
+      state.withObject("last_auth", [&](JsonBuilder &a) {
+        // "HomeKey" matches the type the MQTT transport publishes on ``B/last_auth``.
+        a.addString("type", "HomeKey");
+        a.addString("result", authSuccess ? "SUCCESS" : "FAILURE");
+        a.addNumber("timestamp", static_cast<double>(authTimestamp));
+      });
+    }
+  }
+
+  sendJsonStr(req, state.toStringUnformatted());
+  return ESP_OK;
+}
+
+esp_err_t WebServerManager::handleHaConfig(httpd_req_t *req) {
+  WebServerManager *instance = getInstance(req);
+  if (!instance->basicAuth(req)) return sendAuthFailure(req);
+  if (!instance->haRequireTls(req)) return ESP_OK;
+
+  // Reuse the Web UI's own handlers instead of a parallel implementation, so secret
+  // masking, validation and the MASKED_SECRET write guard behave identically on both
+  // surfaces and cannot drift apart. Both read the same `?type=` parameter.
+  return req->method == HTTP_GET ? handleGetConfig(req) : handleSaveConfig(req);
+}
+
+esp_err_t WebServerManager::handleHaLock(httpd_req_t *req) {
+  WebServerManager *instance = getInstance(req);
+  // Authorisation is the same device credential the rest of the Web UI uses, and it is
+  // the strongest thing this device has: the direct API is reached over TLS with the
+  // node's certificate pinned, so the credential is never exposed to the local network
+  // in the clear. Commands are POST-only so a page the user merely visits cannot drive
+  // the lock.
+  if (!instance->basicAuth(req)) return sendAuthFailure(req);
+  if (!instance->haRequireTls(req)) return ESP_OK;
+
+  if (instance->m_lockManager == nullptr) {
+    return sendJsonError(req, "No lock is configured on this device",
+                         "409 Conflict");
+  }
+
+  // A tiny fixed body: this endpoint deliberately cannot carry anything else.
+  char body[128] = {0};
+  const int received = httpd_req_recv(req, body, sizeof(body) - 1);
+  if (received <= 0) {
+    return sendJsonError(req, "Missing request body", "400 Bad Request");
+  }
+  body[received] = '\0';
+
+  cJSON *root = cJSON_Parse(body);
+  if (root == nullptr) {
+    return sendJsonError(req, "Invalid JSON", "400 Bad Request");
+  }
+  const cJSON *action = cJSON_GetObjectItemCaseSensitive(root, "action");
+  const bool usable = cJSON_IsString(action) && action->valuestring != nullptr;
+  const std::string requested = usable ? action->valuestring : "";
+  cJSON_Delete(root);
+
+  if (requested != "lock" && requested != "unlock") {
+    return sendJsonError(req,
+                         "Expected {\"action\":\"lock\"} or {\"action\":\"unlock\"}",
+                         "400 Bad Request");
+  }
+
+  const uint8_t target =
+      requested == "lock" ? LockManager::LOCKED : LockManager::UNLOCKED;
+  instance->m_lockManager->setTargetState(target, LockManager::WEB);
+  ESP_LOGI(TAG, "Home Assistant requested %s", requested.c_str());
+
+  // Report the state the command produced, taken from the lock manager after the
+  // command rather than from the request: a jammed or failed mechanism must not read
+  // back as success.
+  JsonBuilder result = JsonBuilder::object();
+  result.addString("action", requested);
+  result.addString("state", lockStateToName(instance->m_lockManager->getCurrentState()));
+  result.addNumber("current", instance->m_lockManager->getCurrentState());
+  result.addNumber("target", instance->m_lockManager->getTargetState());
+  sendJsonStr(req, result.toStringUnformatted());
+  return ESP_OK;
 }
 
 esp_err_t WebServerManager::handleCreateBackup(httpd_req_t *req) {

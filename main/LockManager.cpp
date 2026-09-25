@@ -51,7 +51,11 @@ LockManager::LockManager(const espConfig::misc_config_t& miscConfig, const espCo
       ESP_LOGD(TAG, "Received update state event: %d -> %d", s.currentState, s.targetState);
       m_currentState = s.currentState;
       s.targetState = m_targetState;
-      s.source = LockManager::INTERNAL;
+      // The producer's source is kept, not overwritten: HardwareManager reports the
+      // physical switch as INTERNAL and MqttManager reports a household command as
+      // MQTT, and flattening both to INTERNAL here is what previously made every
+      // change indistinguishable from any other.
+      m_lastSource = Source(s.source);
       std::array<uint8_t, sizeof(EventLockState)> d{};
       size_t d_len = alpaca::serialize(s, d);
       AppEventLoop::publish(LOCK_EVENT, LOCK_STATE_CHANGED, d.data(), d_len);
@@ -185,6 +189,20 @@ int LockManager::getTargetState() const {
     return m_targetState;
 }
 
+const char *LockManager::sourceName(uint8_t source) {
+    switch (static_cast<Source>(source)) {
+        case HOMEKIT: return "homekit";
+        case NFC: return "homekey";
+        case MQTT: return "mqtt";
+        case WEB: return "api";
+        // The physical switch, and the momentary timer the device runs itself. Both
+        // are the device acting on its own, which is the honest description of what a
+        // client can conclude.
+        case INTERNAL: return "device";
+    }
+    return "unknown";
+}
+
 /**
  * @brief Change the lock's target state, propagate the change, and trigger any momentary unlock timer.
  *
@@ -208,11 +226,14 @@ void LockManager::setTargetState(uint8_t state, Source source) {
     stopMomentaryTimer();
 
     m_targetState = state;
+    // The origin is carried through to the event so a consumer can say *what* asked
+    // for the change, not merely that one happened.
+    m_lastSource = source;
 
     EventLockState s{
       .currentState = m_currentState,
       .targetState = m_targetState,
-      .source = LockManager::INTERNAL
+      .source = static_cast<uint8_t>(source)
     };
     std::array<uint8_t, sizeof(EventLockState)> d{};
     size_t d_len = alpaca::serialize(s, d);
@@ -253,12 +274,13 @@ void LockManager::overrideState(uint8_t c_state, uint8_t t_state, Source source)
 
     m_currentState = c_state != lockStates::MAX ? c_state : m_currentState;
     m_targetState = t_state != lockStates::MAX ? t_state : m_targetState;
+    m_lastSource = source;
 
     stopMomentaryTimer();
     EventLockState s{
       .currentState = static_cast<uint8_t>(m_currentState),
       .targetState = static_cast<uint8_t>(m_targetState),
-      .source = LockManager::INTERNAL
+      .source = static_cast<uint8_t>(source)
     };
     std::array<uint8_t, sizeof(EventLockState)> d{};
     size_t d_len = alpaca::serialize(s, d);

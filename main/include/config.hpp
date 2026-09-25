@@ -217,6 +217,13 @@ namespace espConfig
     std::string webUsername = WEB_AUTH_USERNAME;
     std::string webPassword = WEB_AUTH_PASSWORD;
     bool webHttpsEnabled = false;
+    // One-time migration latch for `webHttpsEnabled`. A device that has a certificate but
+    // never had HTTPS on had no way to be configured securely over the network, so HTTPS
+    // is switched on for it exactly once (see securityInit()). This flag records that the
+    // offer was made. Without it there would be no way to tell "the user has not decided
+    // yet" from "the user deliberately turned HTTPS off", and switching it back on every
+    // boot would be a setting the user cannot win against.
+    bool httpsAutoEnabledOnce = false;
     uint8_t nfcPinsPreset = NFC_ACTIVE_PRESET;
     std::array<uint8_t, 4> nfcGpioPins{SS_PIN, SCK_PIN, MISO_PIN, MOSI_PIN};
     uint8_t btrLowStatusThreshold = BTR_PROX_BAT_LOW_THRESHOLD;

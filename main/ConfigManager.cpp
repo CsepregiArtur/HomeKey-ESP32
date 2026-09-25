@@ -100,6 +100,7 @@ ConfigManager::ConfigManager() : m_isInitialized(false) {
       {"hsStatusPin", &m_miscConfig.hsStatusPin},
       {"webAuthEnabled", &m_miscConfig.webAuthEnabled},
       {"setupCompleted", &m_miscConfig.setupCompleted},
+      {"httpsAutoEnabledOnce", &m_miscConfig.httpsAutoEnabledOnce},
       {"webUsername", &m_miscConfig.webUsername},
       {"webPassword", &m_miscConfig.webPassword},
       {"webHttpsEnabled", &m_miscConfig.webHttpsEnabled},

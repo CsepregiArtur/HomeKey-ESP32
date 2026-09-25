@@ -70,6 +70,7 @@ homekey/household/<household_id>/nodes/<node_id>/   (household)
 │   ├── status                "completed" / "failed"
 │   └── last                  {status,timestamp} JSON (metadata only)
 ├── last_auth                 {type,result,timestamp} JSON (safe metadata)
+├── lock/last                 {current,target,source,timestamp} JSON (what changed it)
 └── command/
     ├── lock                  [SUB] HMAC-authenticated lock
     └── unlock                [SUB] HMAC-authenticated unlock
@@ -105,6 +106,7 @@ Direction: **ESP→MQTT** (publish), **MQTT→ESP** (subscribe), **HA Disc**, **
 | 15 | `B/backup/status` | ESP→MQTT | backup outcome | `MqttManager::publishBackupStatus()` (from `main.cpp` BACKUP event) | YES | 0 | `completed`/`failed` | TLS / broker creds only | NO | — | STABLE |
 | 16 | `B/backup/last` | ESP→MQTT | backup metadata | `MqttManager::publishBackupStatus()` | YES | 0 | JSON (below) | TLS / broker creds only | NO | backup entity | STABLE |
 | 17 | `B/last_auth` | ESP→MQTT | last HomeKey auth | `MqttManager::publishLastAuth()` | YES | 0 | JSON (below) | TLS / broker creds only | **LOW** (safe metadata) | last_auth entity | STABLE |
+| 17b | `B/lock/last` | ESP→MQTT | what changed the lock | `MqttManager::publishLockChange()` | YES | 0 | JSON (below) | TLS / broker creds only | **LOW** (a source word; no identifiers) | lock entity / activity cause | NEW |
 | 18 | `B/command/lock` | MQTT→ESP | authenticated lock | `MqttManager::handleSecureCommand()` | n/a | 1 | JSON + HMAC | **HMAC-SHA256** | NO | — | STABLE |
 | 19 | `B/command/unlock` | MQTT→ESP | authenticated unlock | `MqttManager::handleSecureCommand()` | n/a | 1 | JSON + HMAC | **HMAC-SHA256** | NO | — | STABLE |
 | 20 | `homeassistant/lock/<P>/lock/config` | HA Disc | lock discovery | `MqttManager::publishHassDiscovery()` | YES | 1 | JSON | TLS / broker creds only | NO | lock | STABLE |
@@ -164,9 +166,30 @@ Encrypted backup contents are **never** published here (or anywhere else on MQTT
 ### `B/last_auth`
 ```json
 {"type":"HomeKey","result":"SUCCESS|FAILURE","timestamp":1760000000}
+{"type":"HomeKey","result":"SUCCESS","timestamp":1760000000,"issuer":"Artur's iPhone"}
 ```
 Safe metadata only. No credential identifiers, APDU, or key material.
 `timestamp` format identical to `backup/last`.
+
+`issuer` is present only when the user has named that issuer in the Web UI, and carries the
+**name they typed** — never the issuer id. Naming an issuer is the opt-in that allows the
+name to be published; a device with unnamed issuers publishes exactly the first form.
+
+### `B/lock/last`
+```json
+{"current":0,"target":0,"source":"homekit","timestamp":1760000000}
+```
+What asked for the most recent lock change. Published immediately **before** the state it
+explains, so a client that wants to name a cause has it on hand by the time the change
+arrives.
+
+`source` ∈ `homekit` | `homekey` | `mqtt` | `api` | `device` | `unknown` (the firmware's
+`LockManager::sourceName()`, shared verbatim with the HTTP API so a client needs one
+vocabulary for both).
+
+`current`/`target` use the same numbering as `lock_current`/`lock_target` in `B/health` and
+are what ties the entry to a state change — a client must not apply a cause to a change it
+does not describe. No identifiers: a source is one of six fixed words.
 
 ---
 

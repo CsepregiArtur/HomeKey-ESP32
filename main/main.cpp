@@ -10,6 +10,8 @@
 #include "LockManager.hpp"
 #include "NfcManager.hpp"
 #include "ConfigManager.hpp"
+#include "DeviceCert.hpp"
+#include "DiscoveryAdvertiser.hpp"
 #include "ReaderDataManager.hpp"
 #include "HardwareManager.hpp"
 #include "MqttManager.hpp"
@@ -46,6 +48,7 @@ ConfigManager configManager;
 std::unique_ptr<HardwareManager> hardwareManager;
 std::unique_ptr<MqttManager> mqttManager;
 WebServerManager webServerManager(configManager, readerDataManager);
+DiscoveryAdvertiser discoveryAdvertiser;
 std::unique_ptr<HomeKitLock> homekitLock;
 std::unique_ptr<NfcManager> nfcManager;
 
@@ -186,10 +189,15 @@ std::function<void(int)> lambda = [](int status) {
     sprintf(identifier, "%.2s%.2s%.2s%.2s%.2s%.2s", HAPClient::accessory.ID, HAPClient::accessory.ID + 3, HAPClient::accessory.ID + 6, HAPClient::accessory.ID + 9, HAPClient::accessory.ID + 12, HAPClient::accessory.ID + 15);
     mqttManager->begin(std::string(identifier));
     webServerManager.begin(); 
+    // The web server only starts once the station interface is up, so this is the first
+    // moment the API has a real port worth advertising.
+    discoveryAdvertiser.onNetworkUp();
   } else if (status == 0){
     pollHS = false;
     mqttManager->end();
     webServerManager.end();
+    // No station interface and no TLS in AP mode, so the API is not advertised there.
+    discoveryAdvertiser.stop();
     WiFi.mode(WIFI_AP_STA);
     uint8_t mac[6];
     esp_read_mac(mac, ESP_MAC_BT);
@@ -361,6 +369,34 @@ void setup() {
   // come up using the credentials this generates on a factory-fresh device.
   securityInit();
 
+  // Give the device its own TLS identity before anything can serve HTTPS. Done here,
+  // rather than lazily on the first HTTPS request, so the fingerprint is available to
+  // advertise over mDNS and to log once at boot.
+  bool certificateGenerated = false;
+  deviceCert::ensureSelfSignedCertificate(configManager, &certificateGenerated);
+
+  // One-time HTTPS enablement. Until now a device could hold a certificate and still serve
+  // plain HTTP, which would leave the Home Assistant API nothing safe to talk to. Offer it
+  // once, record that the offer was made, then leave the setting alone for good - so a user
+  // who deliberately turns HTTPS back off is not fought on every boot.
+  const auto &miscCfg = configManager.getConfig<espConfig::misc_config_t>();
+  if (!miscCfg.httpsAutoEnabledOnce) {
+    const auto &certs = configManager.getHttpsCertsConfig();
+    const bool hasCertificate = !certs.serverCert.empty() && !certs.privateKey.empty();
+    const bool enableHttps = hasCertificate && !miscCfg.webHttpsEnabled;
+    const std::string payload = enableHttps
+        ? "{\"httpsAutoEnabledOnce\":true,\"webHttpsEnabled\":true}"
+        : "{\"httpsAutoEnabledOnce\":true}";
+    if (configManager.updateFromJson<espConfig::misc_config_t>(payload).empty() ||
+        !configManager.saveConfig<espConfig::misc_config_t>()) {
+      ESP_LOGE("Security", "Could not record the one-time HTTPS migration state.");
+    } else if (enableHttps) {
+      ESP_LOGW("Security", "Enabled HTTPS using the %s certificate. Browsers will warn "
+                           "until it is accepted; compare the fingerprint logged above.",
+               certificateGenerated ? "newly generated" : "stored");
+    }
+  }
+
   // --- Household / node model (never erases existing config or HomeKey data) ---
   householdManager = std::make_unique<HouseholdManager>();
   householdManager->begin();
@@ -426,12 +462,16 @@ void setup() {
   webServerManager.setNodeIdentityManager(nodeIdentityManager.get());
   webServerManager.setSecurityManager(securityManager.get());
   webServerManager.setHealthManager(healthManager.get());
+  // Needed by the Home Assistant API (/api/ha/state) to report lock state.
+  webServerManager.setLockManager(lockManager.get());
   webServerManager.setAuditManager(auditManager.get());
   webServerManager.setProvisioningManager(provisioningManager.get());
   mqttManager->setHouseholdManager(householdManager.get());
   mqttManager->setNodeIdentityManager(nodeIdentityManager.get());
   mqttManager->setHealthManager(healthManager.get());
   mqttManager->setAuditManager(auditManager.get());
+  // Lets the household last_auth topic report the name a user gave a paired controller.
+  mqttManager->setReaderDataManager(&readerDataManager);
 
   healthManager->setSecurityManager(securityManager.get());
   healthManager->setNfcManager(nfcManager.get());
@@ -455,6 +495,9 @@ void setup() {
   hardwareManager->begin();
   homekitLock->begin();
   lockManager->begin();
+  // Records what to advertise. The service is not published here because HomeSpan's
+  // status callback starts the web server and is what gives the API a port to advertise.
+  discoveryAdvertiser.begin(configManager, *nodeIdentityManager, webServerManager);
   pollHS = true;
 }
 /**
@@ -467,6 +510,9 @@ void setup() {
 void loop() {
   if(pollHS)
     homeSpan.poll();
+
+  // Self-heals the mDNS record if HomeSpan tore the responder down underneath us.
+  discoveryAdvertiser.refresh();
 
   // Publish household node telemetry on a slow cadence so the MQTT entities
   // (state/health/security/backup) stay fresh without hammering NVS or MQTT.

@@ -21,14 +21,34 @@ public:
     /**
      * @enum Source
      * @brief Defines the origin of a lock command, allowing for different logic paths.
-     * Not really used at the moment
+     *
+     * Carried through on every ``LOCK_STATE_CHANGED`` event so a consumer can report
+     * *what* asked for a change rather than only that one happened.
+     *
+     * WEB covers the device's own HTTP API (the Web UI and the Home Assistant direct
+     * API). It is appended last so the existing numeric values, which are carried
+     * through the event bus, keep their meaning.
      */
     enum Source {
         INTERNAL,
         HOMEKIT,
         NFC,
         MQTT,
+        WEB,
     };
+
+    /**
+     * @brief Name a source for a client that should not hard-code the numeric enum.
+     *
+     * These are the exact strings published on the household lock topic and in the
+     * HTTP API, so both surfaces spell a source the same way and a client needs one
+     * vocabulary for all of them.
+     *
+     * Takes the raw value that crosses the wire rather than ``Source``, so a corrupted
+     * or future value is reported as unknown instead of being mapped onto a real
+     * origin and blamed on something that did not do it.
+     */
+    static const char *sourceName(uint8_t source);
 
     enum lockStates { UNLOCKED, LOCKED, JAMMED, UNKNOWN, UNLOCKING, LOCKING, MAX };
 
@@ -65,6 +85,15 @@ public:
     int getCurrentState() const;
     int getTargetState() const;
 
+    /**
+     * @brief Origin of the most recent lock change.
+     *
+     * Describes the change that produced the current state, so a caller can report
+     * *who* opened the door. It is the last source seen rather than a property of the
+     * state itself: two sources can produce the same state.
+     */
+    Source lastChangeSource() const { return m_lastSource; }
+
     // --- Command Methods ---
 
     /**
@@ -88,6 +117,7 @@ private:
 
     uint8_t m_currentState;
     uint8_t m_targetState;
+    Source m_lastSource = INTERNAL;
     AppEventLoop::SubscriptionHandle m_override_state_event;
     AppEventLoop::SubscriptionHandle m_target_state_event;
     AppEventLoop::SubscriptionHandle m_update_state_event;

@@ -133,8 +133,9 @@ void unpack_issuer(msgpack_object obj, ddk::Issuer& issuer) {
 }
 
 void pack_all(msgpack_packer* pk, const ddk::ReaderIdentity& identity,
-              const std::vector<ddk::Issuer>& issuers) {
-    msgpack_pack_map(pk, 6);
+              const std::vector<ddk::Issuer>& issuers,
+              const std::map<std::string, std::string>& issuer_labels) {
+    msgpack_pack_map(pk, 7);
 
     pack_bytes(pk, "reader_private_key", identity.private_key);
     pack_bytes(pk, "reader_public_key", identity.public_key);
@@ -148,10 +149,24 @@ void pack_all(msgpack_packer* pk, const ddk::ReaderIdentity& identity,
     for (const auto& issuer : issuers) {
         pack_issuer(pk, issuer);
     }
+
+    // Added after the original format, as a key of its own rather than a field on the
+    // issuer: an older firmware reading this blob ignores keys it does not know, so the
+    // addition cannot make a downgrade unreadable.
+    msgpack_pack_str(pk, strlen("issuer_labels"));
+    msgpack_pack_str_body(pk, "issuer_labels", strlen("issuer_labels"));
+    msgpack_pack_map(pk, issuer_labels.size());
+    for (const auto& [id, label] : issuer_labels) {
+        msgpack_pack_str(pk, id.size());
+        msgpack_pack_str_body(pk, id.c_str(), id.size());
+        msgpack_pack_str(pk, label.size());
+        msgpack_pack_str_body(pk, label.c_str(), label.size());
+    }
 }
 
 void unpack_all(msgpack_object obj, ddk::ReaderIdentity& identity,
-                std::vector<ddk::Issuer>& issuers) {
+                std::vector<ddk::Issuer>& issuers,
+                std::map<std::string, std::string>& issuer_labels) {
     if (obj.type != MSGPACK_OBJECT_MAP) {
         ESP_LOGE(CODEC_TAG, "Expected map for top-level deserialization.");
         return;
@@ -168,6 +183,20 @@ void unpack_all(msgpack_object obj, ddk::ReaderIdentity& identity,
         issuers.resize(issuers_array.size);
         for (uint32_t i = 0; i < issuers_array.size; ++i) {
             unpack_issuer(issuers_array.ptr[i], issuers[i]);
+        }
+    }
+
+    issuer_labels.clear();
+    auto labels = obj_map.find("issuer_labels");
+    if (labels != obj_map.end() && labels->second.type == MSGPACK_OBJECT_MAP) {
+        const msgpack_object_map& entries = labels->second.via.map;
+        for (uint32_t i = 0; i < entries.size; ++i) {
+            const msgpack_object_kv& kv = entries.ptr[i];
+            if (kv.key.type != MSGPACK_OBJECT_STR || kv.val.type != MSGPACK_OBJECT_STR) {
+                continue;
+            }
+            issuer_labels[std::string(kv.key.via.str.ptr, kv.key.via.str.size)] =
+                std::string(kv.val.via.str.ptr, kv.val.via.str.size);
         }
     }
 }
@@ -233,13 +262,14 @@ void NvsCredentialStore::save() {
         std::lock_guard<std::mutex> lock(mutex_);
         snap.identity = identity_;
         snap.issuers = issuers_;
+        snap.issuer_labels = issuer_labels_;
     }
 
     msgpack_sbuffer sbuf;
     msgpack_packer pk;
     msgpack_sbuffer_init(&sbuf);
     msgpack_packer_init(&pk, &sbuf, msgpack_sbuffer_write);
-    pack_all(&pk, snap.identity, snap.issuers);
+    pack_all(&pk, snap.identity, snap.issuers, snap.issuer_labels);
 
     esp_err_t set_err = nvs_set_blob(handle_, NVS_KEY, sbuf.data, sbuf.size);
     msgpack_sbuffer_destroy(&sbuf);
@@ -276,6 +306,7 @@ void NvsCredentialStore::load() {
         std::lock_guard<std::mutex> lock(mutex_);
         identity_ = {};
         issuers_.clear();
+        issuer_labels_.clear();
         return;
     }
     if (err != ESP_OK) {
@@ -300,10 +331,12 @@ void NvsCredentialStore::load() {
     if (success) {
         ddk::ReaderIdentity loadedIdentity{};
         std::vector<ddk::Issuer> loadedIssuers;
-        unpack_all(unpacked.data, loadedIdentity, loadedIssuers);
+        std::map<std::string, std::string> loadedLabels;
+        unpack_all(unpacked.data, loadedIdentity, loadedIssuers, loadedLabels);
         std::lock_guard<std::mutex> lock(mutex_);
         identity_ = std::move(loadedIdentity);
         issuers_ = std::move(loadedIssuers);
+        issuer_labels_ = std::move(loadedLabels);
     } else {
         ESP_LOGE(TAG, "Failed to parse msgpack for reader data. Data may be corrupt.");
     }
@@ -315,7 +348,60 @@ NvsCredentialStore::Snapshot NvsCredentialStore::snapshot() const {
     Snapshot snap;
     snap.identity = identity_;
     snap.issuers = issuers_;
+    snap.issuer_labels = issuer_labels_;
     return snap;
+}
+
+// ---------------------------------------------------------------------------
+// Issuer labels
+// ---------------------------------------------------------------------------
+
+std::string NvsCredentialStore::labelKey(const std::vector<uint8_t>& issuerId) {
+    // Uppercase hex with no separators, matching how the Web UI and the household
+    // contract spell an issuer id. Keying on the same spelling everywhere means a
+    // label cannot end up attached to "nothing" because two surfaces disagreed about
+    // case or punctuation.
+    static const char* digits = "0123456789ABCDEF";
+    std::string key;
+    key.reserve(issuerId.size() * 2);
+    for (uint8_t byte : issuerId) {
+        key.push_back(digits[byte >> 4]);
+        key.push_back(digits[byte & 0x0F]);
+    }
+    return key;
+}
+
+std::string NvsCredentialStore::issuerLabel(const std::vector<uint8_t>& issuerId) const {
+    const std::string key = labelKey(issuerId);
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto it = issuer_labels_.find(key);
+    return it == issuer_labels_.end() ? std::string() : it->second;
+}
+
+bool NvsCredentialStore::setIssuerLabel(const std::vector<uint8_t>& issuerId,
+                                       const std::string& label) {
+    if (label.size() > kMaxIssuerLabelLength) {
+        ESP_LOGW(TAG, "Refusing a %zu-character issuer label (max %zu)", label.size(),
+                 kMaxIssuerLabelLength);
+        return false;
+    }
+    // Control characters are refused rather than stored: the label reaches the Web UI,
+    // the household MQTT topic and the HTTP API, and an embedded newline or escape would
+    // be somewhere between unreadable and actively misleading in all three.
+    for (unsigned char c : label) {
+        if (c < 0x20 || c == 0x7F) {
+            ESP_LOGW(TAG, "Refusing an issuer label containing control characters");
+            return false;
+        }
+    }
+    const std::string key = labelKey(issuerId);
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (label.empty()) {
+        issuer_labels_.erase(key);
+        return true;
+    }
+    issuer_labels_[key] = label;
+    return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -350,6 +436,7 @@ bool NvsCredentialStore::deleteAllReaderData() {
         std::lock_guard<std::mutex> lock(mutex_);
         identity_ = {};
         issuers_.clear();
+        issuer_labels_.clear();
     }
     ESP_LOGI(TAG, "In-memory reader data cleared.");
 
@@ -407,6 +494,10 @@ bool NvsCredentialStore::removeIssuerIfExists(const std::vector<uint8_t>& issuer
     }
 
     ESP_LOGI(TAG, "Removing issuer.");
+    // The label goes with the pairing. Leaving it behind would leave a name pointing at
+    // an issuer that no longer exists, and a controller that later re-paired into the
+    // same id would silently inherit a name given to something else.
+    issuer_labels_.erase(labelKey(issuerId));
     issuers_.erase(it);
     return true;
 }

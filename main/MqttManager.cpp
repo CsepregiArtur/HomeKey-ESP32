@@ -8,6 +8,7 @@
 #include "NodeIdentityManager.hpp"
 #include "HealthManager.hpp"
 #include "AuditManager.hpp"
+#include "ReaderDataManager.hpp"
 #include <cstdlib>
 #include <cstring>
 #include <algorithm>
@@ -106,6 +107,9 @@ bool MqttManager::begin(std::string deviceID) {
       EventLockState s = alpaca::deserialize<EventLockState>(payload, ec);
       if(ec) { ESP_LOGE(TAG, "Failed to deserialize lock state event: %s", ec.message().c_str()); return; }
       ESP_LOGD(TAG, "Received lock state event: %d -> %d", s.currentState, s.targetState);
+      // Published before the state itself, so a subscriber always has the cause on hand
+      // by the time the state it explains arrives.
+      if(!ec) publishLockChange(s.currentState, s.targetState, s.source);
       if(!ec) publishLockState(s.currentState, s.targetState);
     });
     m_alt_action = AppEventLoop::subscribe(HW_EVENT, HW_ALT_ACTION, [&](const uint8_t* data, size_t size){
@@ -125,7 +129,12 @@ bool MqttManager::begin(std::string deviceID) {
             if(s.status){
               publishHomeKeyTap(s.issuerId, s.endpointId, s.readerId);
             }
-            publishLastAuth("HomeKey", s.status ? "SUCCESS" : "FAILURE");
+            // The name the user gave this controller, if any. Looked up here because this
+            // is the one place that knows which issuer just authenticated: the lock event
+            // that follows carries only how the change was requested, not by whom.
+            const std::string issuerLabel =
+                m_readerData == nullptr ? std::string() : m_readerData->issuerLabel(s.issuerId);
+            publishLastAuth("HomeKey", s.status ? "SUCCESS" : "FAILURE", issuerLabel);
           } else {
             ESP_LOGE(TAG, "Failed to deserialize HomeKey event: %s", ec.message().c_str());
             return;
@@ -501,6 +510,23 @@ void MqttManager::onData(const std::string& topic, const std::string& data) {
  * @param targetState Numeric code representing the lock's target state.
  */
 
+void MqttManager::publishLockChange(const int currentState, const int targetState,
+                                    const uint8_t source) {
+    const std::string base = baseTopic();
+    if (base.empty()) {
+        return;
+    }
+    // Retained: the point of this topic is to answer "who did that?" for the change
+    // that produced the state the client is looking at, and a client that connects
+    // afterwards still needs the last answer. No secrets are involved - a source is
+    // one of five fixed words.
+    publish(base + "/lock/last",
+            fmt::format("{{\"current\":{},\"target\":{},\"source\":\"{}\",\"timestamp\":{}}}",
+                        currentState, targetState, LockManager::sourceName(source),
+                        wallClockSeconds()),
+            0, true);
+}
+
 void MqttManager::publishLockState(const int currentState, const int targetState) {
     std::string stateStr;
     if (currentState != targetState) {
@@ -866,17 +892,25 @@ void MqttManager::publishBackupStatus(const std::string &status) {
             0, true);
 }
 
-void MqttManager::publishLastAuth(const std::string &authType, const std::string &result) {
+void MqttManager::publishLastAuth(const std::string &authType, const std::string &result,
+                                  const std::string &issuerLabel) {
     const std::string base = baseTopic();
     if (base.empty()) {
         return;
     }
-    // Safe metadata only: type, result, timestamp. No credential identifiers,
-    // raw APDU, cryptographic material or HomeKey secrets.
-    publish(base + "/last_auth",
-            fmt::format("{{\"type\":\"{}\",\"result\":\"{}\",\"timestamp\":{}}}",
-                        authType, result, wallClockSeconds()),
-            0, true);
+    // Safe metadata only: type, result, timestamp, and - when the user named the issuer -
+    // that name. Built with the JSON builder rather than string formatting because the
+    // label is free text the user typed: a quote or backslash in it would otherwise
+    // produce a malformed document that a subscriber would reject as a payload fault.
+    // The issuer id itself is never published, named or not.
+    JsonBuilder payload = JsonBuilder::object();
+    payload.addString("type", authType);
+    payload.addString("result", result);
+    payload.addNumber("timestamp", static_cast<double>(wallClockSeconds()));
+    if (!issuerLabel.empty()) {
+        payload.addString("issuer", issuerLabel);
+    }
+    publish(base + "/last_auth", payload.toStringUnformatted(), 0, true);
 }
 
 std::string MqttManager::makeCommandMac(uint64_t ts, const std::string &nonce,

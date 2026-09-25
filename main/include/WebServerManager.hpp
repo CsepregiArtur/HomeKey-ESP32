@@ -25,6 +25,7 @@ class AuditManager;
 class ProvisioningManager;
 class BackupManager;
 class RestoreManager;
+class LockManager;
 namespace loggable {
 class WebSocketLogSinker;
 }
@@ -81,6 +82,7 @@ public:
   void setNodeIdentityManager(NodeIdentityManager *n) { m_nodeIdentityManager = n; }
   void setSecurityManager(SecurityManager *s) { m_securityManager = s; }
   void setHealthManager(HealthManager *h) { m_healthManager = h; }
+  void setLockManager(LockManager *l) { m_lockManager = l; }
   void setAuditManager(AuditManager *a) { m_auditManager = a; }
   void setProvisioningManager(ProvisioningManager *p) { m_provisioningManager = p; }
   void setBackupManager(BackupManager *b) { m_backupManager = b; }
@@ -96,6 +98,22 @@ public:
    */
   [[nodiscard]] uint64_t getWsFrameDropCount() const {
     return m_wsFrameDropped.load(std::memory_order_relaxed);
+  }
+
+  /**
+   * @brief Whether the server is actually serving TLS.
+   *
+   * The server falls back to plain HTTP when the TLS context cannot be created, so
+   * "a certificate is configured" is a different question from "this connection is
+   * encrypted". Machine-to-machine callers need the second one.
+   */
+  [[nodiscard]] bool isTlsActive() const {
+    return m_tlsActive.load(std::memory_order_relaxed);
+  }
+
+  /// Port the server actually bound: 443 with TLS, 80 without.
+  [[nodiscard]] uint16_t getServerPort() const {
+    return m_serverPort.load(std::memory_order_relaxed);
   }
 
 private:
@@ -177,6 +195,7 @@ private:
 
   // Household / node / backup / recovery / provisioning endpoints
   static esp_err_t handleGetHousehold(httpd_req_t *req);
+  static esp_err_t handleSetIssuerName(httpd_req_t *req);
   static esp_err_t handleGetNode(httpd_req_t *req);
   static esp_err_t handleGetHealth(httpd_req_t *req);
   static esp_err_t handleGetSecurity(httpd_req_t *req);
@@ -187,6 +206,38 @@ private:
   static esp_err_t handleExportRecovery(httpd_req_t *req);
   static esp_err_t handleIssueProvisioning(httpd_req_t *req);
   static esp_err_t handleJoinHousehold(httpd_req_t *req);
+
+  // ------------------------------------------------------------------------
+  // Home Assistant direct API (/api/ha/*)
+  //
+  // A second way into the same data as the Web UI, for a client that has neither a
+  // broker nor a browser. Namespaced under /api/ deliberately: a bare /health or
+  // /household endpoint collides with the Web UI page of the same name and makes the
+  // page unloadable on refresh.
+  // ------------------------------------------------------------------------
+  static esp_err_t handleHaInfo(httpd_req_t *req);
+  static esp_err_t handleHaState(httpd_req_t *req);
+  static esp_err_t handleHaConfig(httpd_req_t *req);
+  static esp_err_t handleHaLock(httpd_req_t *req);
+
+  /**
+   * @brief Refuse an API call when the transport is not encrypted.
+   *
+   * Returns true when TLS is active. Otherwise it sends 503 and returns false. A
+   * machine-to-machine caller cannot be warned by a browser padlock, so sending the
+   * answer in the clear anyway would be the wrong default.
+   */
+  bool haRequireTls(httpd_req_t *req) const;
+
+  // ------------------------------------------------------------------------
+  // HTTP to HTTPS redirect
+  //
+  // Once TLS is on, the server only listens on 443, so a plain http:// URL to the device
+  // stops working entirely. That breaks every bookmark and typed address that worked
+  // before, so port 80 is kept open purely to redirect.
+  // ------------------------------------------------------------------------
+  void startHttpsRedirectServer();
+  static esp_err_t handleHttpRedirect(httpd_req_t *req);
 
   static void captivePortalSaveTask(void* pvParameters);
   static void captivePortalEthSaveTask(void* pvParameters);
@@ -238,12 +289,17 @@ private:
 
   // HTTP Server
   httpd_handle_t m_server;
+
+  // Plain-HTTP listener on port 80 that redirects to HTTPS. Only exists while TLS is
+  // active, because otherwise the main server is already on port 80.
+  httpd_handle_t m_redirectServer = nullptr;
   static const char *TAG;
   std::string m_sessionId;
   HouseholdManager *m_householdManager = nullptr;
   NodeIdentityManager *m_nodeIdentityManager = nullptr;
   SecurityManager *m_securityManager = nullptr;
   HealthManager *m_healthManager = nullptr;
+  LockManager *m_lockManager = nullptr;
   AuditManager *m_auditManager = nullptr;
   ProvisioningManager *m_provisioningManager = nullptr;
   BackupManager *m_backupManager = nullptr;
@@ -272,5 +328,10 @@ private:
   std::atomic<uint16_t> wsBacklogSize{0};
   std::atomic<uint64_t> m_wsFrameDropped{0};
   std::atomic<bool> m_otaInProgress{false};
+  // Recorded from the port httpd_ssl_start() actually chose (443 for TLS, 80 otherwise)
+  // so that anything advertising the API advertises where it really is, and whether it
+  // is really encrypted.
+  std::atomic<bool> m_tlsActive{false};
+  std::atomic<uint16_t> m_serverPort{0};
   bool m_isInitialized{false};
 };
