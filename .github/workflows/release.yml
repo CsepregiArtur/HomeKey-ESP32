@@ -17,8 +17,9 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # This fork builds the original ESP32 only (Secure Boot V1 + the
-          # flash-encryption partition layout are esp32-specific).
+          # This fork builds the original ESP32 only (Secure Boot V1 and the
+          # flash-encryption partition layout are esp32-specific; both are
+          # disabled by default - see docs/content/PATH2_SECURITY_ROLLOUT.md).
           gh run download --name "esp32-firmware" --repo ${{ github.repository }} && \
           gh run download --name "esp32-firmware-factory" --repo ${{ github.repository }} && \
           gh run download --name "littlefs-binary" --repo ${{ github.repository }}

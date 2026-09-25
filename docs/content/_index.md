@@ -23,13 +23,17 @@ You are currently viewing the documentation for the **bleeding edge** (`main` br
 | MQTT | Legacy topics | **+ household namespace** and HA discovery |
 | MQTT lock/unlock | Plain numeric payloads | **HMAC-SHA256 authenticated** |
 | Web UI | Misc, MQTT, OTA, Logs | **+ household, node, health, security, audit, backup, recovery, provision** |
-| **Flash encryption** | **Disabled** | **Enabled** |
-| **Secure Boot** | **Disabled** | **Enabled** (V1, ECDSA-P256) |
-| **NVS encryption** | **Disabled** | **Enabled** |
+| **Flash encryption** | **Disabled** | **Supported** (currently off) |
+| **Secure Boot** | **Disabled** | **Supported** (currently off, V1 ECDSA-P256) |
+| **NVS encryption** | **Disabled** | **Supported** (currently off) |
 
 **Unchanged:** the HomeKey/NFC protocol, lock logic, the HomeKit accessory model, the existing Web UI pages and all existing MQTT topics.
 
-> Flash encryption is **irreversible** and requires a serial re-flash plus full re-provisioning of existing devices. Read **[Fork vs Upstream](fork-vs-upstream)** for the full comparison, and [Security](security) / [Updates](updates) before upgrading.
+> The security features are **implemented but disabled by default** so the board stays
+> fully reversible. Turning them on is a deferred, one-way step: it burns eFuses, erases
+> existing device data and requires a serial re-flash plus full re-provisioning. Read
+> **[Security Rollout Plan: Path 1 → Path 2](PATH2_SECURITY_ROLLOUT)** before enabling
+> anything, and see **[Fork vs Upstream](fork-vs-upstream)** for the full comparison.
 {{< /callout >}}
 
 Welcome to the HomeKey-ESP32 documentation! This is your one-stop shop for everything you need to know about setting up, configuring, and using your HomeKey-ESP32 device. Whether you're a seasoned ESP32 developer or just starting your smart home journey, we've got you covered.

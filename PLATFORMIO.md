@@ -1,14 +1,18 @@
 # Building & flashing with PlatformIO
 
 > [!NOTE]
-> **Fork differences.** `pio run -t upload` writes an **unsigned** application. This
-> fork enables Secure Boot V1, and the partition layout changed (partition table at
-> `0xD000`, an `nvs_keys` partition added, app partitions 64 KiB aligned), so
-> `platformio.ini`'s `board_build.partitions = with_ota.csv` refers to the new table.
-> A device whose eFuses are already burned with a Secure Boot key will **reject** an
-> unsigned `pio` build — use `idf.py` with a configured `CONFIG_SECURE_BOOT_SIGNING_KEY`
-> for those devices. See [Fork vs Upstream](docs/content/fork-vs-upstream.md) and
-> [Security](docs/content/security.md).
+> **Fork differences.** This fork **supports** flash encryption, Secure Boot V1 and NVS
+> encryption, but they are **disabled by default** so the board stays fully reversible.
+> `platformio.ini`'s `board_build.partitions = with_ota.csv` therefore refers to the
+> plain upstream-compatible layout, and `pio run -t upload` writes a normal unsigned
+> application.
+>
+> If you execute the Path 2 rollout, the partition table moves to `0xD000` with an
+> added `nvs_keys` partition, and a device whose eFuses are already burned with a
+> Secure Boot key will **reject** an unsigned `pio` build — use `idf.py` with a
+> configured `CONFIG_SECURE_BOOT_SIGNING_KEY` for those devices. See
+> [Security Rollout Plan: Path 1 → Path 2](docs/content/PATH2_SECURITY_ROLLOUT.md)
+> and [Security](docs/content/security.md).
 
 `platformio.ini` (plus the two hooks in `scripts/`) allows building, flashing and
 monitoring this project with PlatformIO instead of `idf.py`.

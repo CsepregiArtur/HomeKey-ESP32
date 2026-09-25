@@ -8,23 +8,24 @@ weight: 3
 > [!NOTE]
 > **Fork differences in the Web UI.** Upstream ships the Misc, MQTT, OTA, Logs and
 > Actions pages. This fork **adds** *household*, *node*, *health*, *security*,
-> *audit*, *backup*, *recovery* and *provision*, and changes the default security
-> posture (flash encryption on). The existing pages are unchanged. See
+> *audit*, *backup*, *recovery* and *provision*. The existing pages are unchanged, and
+> the default security posture matches upstream (flash encryption off). See
 > [Fork vs Upstream](fork-vs-upstream).
 
 Welcome to the control center of your HomeKey-ESP32! This guide will walk you through all the settings you can tweak to make your device work exactly how you want it to. All these configurations are easily managed through the device's intuitive web interface.
 
 > [!CAUTION]
-> **Flash memory, NVS and the firmware are encrypted and signature-verified in this fork.**
-> Flash encryption, Secure Boot V1 and NVS encryption are enabled by default, so the
-> configuration, Wi-Fi credentials and HomeKey material stored on the device are
-> ciphertext and only signed firmware boots.
+> **This fork can encrypt flash memory, NVS and the firmware, and signature-verify it.**
+> Flash encryption, Secure Boot V1 and NVS encryption are **implemented but disabled by
+> default**, so on a default build the configuration, Wi-Fi credentials and HomeKey
+> material are stored as plaintext, exactly like upstream.
 >
-> This is **irreversible**: the eFuses are one-time programmable. Upgrading an
-> existing device **erases its Wi-Fi credentials, HomeKit pairing and HomeKey
-> enrolment**, and because the partition layout changed an OTA update is not
-> possible - a serial flash and full re-provisioning are required. See
-> [Security](security#flash-encryption-secure-boot-and-nvs-encryption) before flashing.
+> Enabling them is a **deferred, one-way step**. It is irreversible: the eFuses are
+> one-time programmable. It **erases the device's Wi-Fi credentials, HomeKit pairing and
+> HomeKey enrolment**, and because the partition layout changes an OTA update is not
+> possible - a serial flash and full re-provisioning are required. Read
+> **[Security Rollout Plan: Path 1 → Path 2](PATH2_SECURITY_ROLLOUT)** before enabling
+> anything.
 
 ## 1. Accessing the Web Interface
 

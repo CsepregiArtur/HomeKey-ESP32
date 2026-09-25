@@ -31,3 +31,7 @@ keys/
 *.firmware.bin
 *.firmware.factory.bin
 littlefs.bin
+
+# Python bytecode
+__pycache__/
+*.pyc

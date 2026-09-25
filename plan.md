@@ -137,6 +137,26 @@ architecture. Status legend: `[x]` done, `[~]` in progress, `[ ]` pending.
 ## Phase 14 — Security warnings
 - [x] Security page lists HTTPS / MQTT TLS / mTLS / OTA signature / Secure Boot / Flash encryption / Web auth / HomeSpan OTA (no numeric score)
 
+## Phase 14b — Hardware security rollout (Path 1 → Path 2)
+- [x] Flash encryption + Secure Boot V1 + NVS encryption implemented in config
+- [x] **Reverted to Path 1**: features disabled so the board stays fully reversible;
+      no eFuses burned. Enabled build boot-looped with
+      `Flash encryption eFuse bit was not enabled in bootloader but
+      CONFIG_SECURE_FLASH_ENC_ENABLED is on` -> `abort()` in
+      `esp_flash_encryption_init_checks`
+- [x] Partition table restored to default `0x8000`; `nvs_keys` removed; `nvs` at
+      `0x9000`, otadata `0xF000`
+- [x] Verified on hardware: builds clean, flashes, boots (eFuses confirmed pristine:
+      `FLASH_CRYPT_CNT=0b0000000`, `BLOCK1` empty, `ABS_DONE_0=False`)
+- [x] Deferred Path 2 procedure documented in
+      `docs/content/PATH2_SECURITY_ROLLOUT.md` with prerequisites, four stages
+      (flash enc -> NVS enc -> Secure Boot V1 -> release mode) and consequences
+- [ ] **Path 2 execution** — blocked on full hardware validation of Path 1
+      (boot, OTA, provisioning, HomeKit pairing, MQTT contract, backup/restore)
+- [~] Known hardware issue at time of writing: `Pn532Reader` cannot establish a
+      connection (`err=2`) -> `NfcManager` retries. Wiring/hardware, unrelated to
+      encryption.
+
 ## Phase 15 — Audit log
 - [x] Event coverage (HomeKey auth, lock/unlock, MQTT command, provisioning, backup, restore, enrollment)
 - [x] Bounded storage (256 fixed-size records), no secrets logged

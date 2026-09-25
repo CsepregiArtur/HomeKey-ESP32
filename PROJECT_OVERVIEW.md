@@ -19,9 +19,14 @@
 > | Backup / provisioning | — | Encrypted+signed backup; one-time join codes |
 > | MQTT | Legacy topics | **+ household namespace**, HA discovery, HMAC commands |
 > | Web UI | Misc/MQTT/OTA/Logs | **+ household, node, health, security, audit, backup, recovery, provision** |
-> | Flash encryption | **Disabled** | **Enabled** |
-> | Secure Boot | **Disabled** | **Enabled** (V1, ECDSA-P256) |
-> | NVS encryption | **Disabled** | **Enabled** |
+> | Flash encryption | **Disabled** | **Supported** (off by default) |
+> | Secure Boot | **Disabled** | **Supported** (off by default, V1 ECDSA-P256) |
+> | NVS encryption | **Disabled** | **Supported** (off by default) |
+>
+> **Right now this fork builds and flashes exactly like upstream** — the hardening is
+> implemented but off, so the board stays fully reversible. Enabling it is a deferred,
+> staged, one-way rollout: see
+> [Security Rollout Plan: Path 1 → Path 2](docs/content/PATH2_SECURITY_ROLLOUT.md).
 >
 > **Unchanged from upstream:** HomeKey/NFC protocol, lock logic, HomeKit accessory
 > model, existing Web UI pages and all existing MQTT topics.
@@ -49,7 +54,7 @@ The tagline: *"Apple HomeKey functionality for the rest of us"* — no proprieta
 | **OTA** | Firmware and LittleFS (web UI) updates over the network |
 | **Hardware actions** | Relays/GPIO, NeoPixels, feedback LEDs, alternate action button |
 | **Ethernet** | Wired networking as an alternative to Wi-Fi |
-| **Security** | Per-device generated credentials, Web UI auth, HTTPS/mTLS, OTA verification, **flash encryption + Secure Boot V1 + NVS encryption**, HMAC-authenticated MQTT commands, encrypted signed backups |
+| **Security** | Per-device generated credentials, Web UI auth, HTTPS/mTLS, OTA verification, **optional flash encryption + Secure Boot V1 + NVS encryption** (disabled by default), HMAC-authenticated MQTT commands, encrypted signed backups |
 
 ---
 

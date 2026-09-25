@@ -169,9 +169,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # This fork enables flash encryption + Secure Boot V1 + NVS encryption
-        # with an esp32-specific partition layout, so CI targets the original
-        # ESP32 only. Other SoCs need Secure Boot V2 and their own layout.
+        # This fork *supports* flash encryption + Secure Boot V1 + NVS encryption
+        # (disabled by default) with an esp32-specific partition layout once the
+        # Path 2 rollout is executed, so CI targets the original ESP32 only.
+        # Other SoCs need Secure Boot V2 and their own layout.
         target: [esp32]
     steps:
       - name: Checkout
@@ -189,15 +190,20 @@ jobs:
         env:
           SECURE_BOOT_SIGNING_KEY: ${{ secrets.SECURE_BOOT_SIGNING_KEY }}
         run: |
-          # Materials the real Secure Boot key from the repository secret so CI
-          # produces flashable images. `scripts/ci_build.sh` only falls back to a
-          # throwaway key when this file is missing.
+          # Materials the real Secure Boot key from the repository secret so CI can
+          # produce signed images when the security hardening is enabled.
+          #
+          # NOTE: Secure Boot and flash encryption are DISABLED in
+          # sdkconfig.defaults by default ("Path 1" - fully reversible), so the
+          # signed-binary step is skipped and this key is unused for normal builds.
+          # It only takes effect once the Path 2 rollout is executed; see
+          # docs/content/PATH2_SECURITY_ROLLOUT.md.
           mkdir -p keys
           if [ -n "${SECURE_BOOT_SIGNING_KEY}" ]; then
             printf '%s' "${SECURE_BOOT_SIGNING_KEY}" | base64 -d > keys/secure_boot_signing_key.pem
-            echo "::notice title=Secure Boot::SIGNED WITH YOUR KEY - the real secure_boot_signing_key.pem was installed from the SECURE_BOOT_SIGNING_KEY secret."
+            echo "::notice title=Secure Boot::SIGNED WITH YOUR KEY - the real secure_boot_signing_key.pem was installed from the SECURE_BOOT_SIGNING_KEY secret. Only used when CONFIG_SECURE_BOOT=y."
           else
-            echo "::warning title=THROWAWAY SIGNING KEY::SECURE_BOOT_SIGNING_KEY is not set, so this build is signed with a throwaway key that only boots on a device with unburned eFuses. Set the secret to publish flashable images."
+            echo "::notice title=Secure Boot::No signing key configured. This is expected while Secure Boot is disabled (Path 1); the build is plaintext and unsigned."
           fi
       - uses: actions/cache@v5
         with:

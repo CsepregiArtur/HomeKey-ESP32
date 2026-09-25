@@ -5,43 +5,43 @@ Notable changes per release. User-facing detail lives in the docs:
 
 ## 0.10.0 - 2026-09-22
 
-Adds the **Household** multi-node architecture and enables **on-device flash
+Adds the **Household** multi-node architecture and **support for on-device flash
 encryption + Secure Boot V1 + NVS encryption**. Read the *Breaking* section before
 updating.
 
-### Security (breaking)
+### Security
 
-* **Flash encryption, Secure Boot V1 and NVS encryption are now enabled**
-  (`CONFIG_SECURE_FLASH_ENC_ENABLED`, `CONFIG_SECURE_BOOT`, `CONFIG_NVS_ENCRYPTION`).
-  The app, NVS and LittleFS contents are encrypted at rest, and only firmware
-  signed with your Secure Boot key boots.
-* **The partition layout changed**: an `nvs_keys` partition was added, the
-  partition table moved from `0x8000` to `0xD000` (the signed bootloader no longer
-  fits in `0x7000`), and the app partitions were realigned to 64 KiB boundaries.
-* **OTA from an older build will not boot** — existing devices must be re-flashed
-  over serial and fully re-provisioned. Wi-Fi credentials, HomeKit pairing and
-  HomeKey reader enrolment are erased when the flash is first encrypted.
+* **Flash encryption, Secure Boot V1 and NVS encryption are implemented but
+  DISABLED by default** in this release. The board stays fully reversible: no eFuses
+  are burned and no device data is lost on upgrade.
+* The hardening is available as a **deferred, staged, one-way rollout** — see
+  [Security Rollout Plan: Path 1 → Path 2](docs/content/PATH2_SECURITY_ROLLOUT.md).
+  Enable and verify flash encryption, then NVS encryption, then Secure Boot, then
+  release mode, one stage at a time.
+* When enabled, the app, NVS and LittleFS contents are encrypted at rest and only
+  firmware signed with your Secure Boot key boots. The partition layout then
+  changes: an `nvs_keys` partition is added, the partition table moves from `0x8000`
+  to `0xD000` (the signed bootloader no longer fits in `0x7000`), and the app
+  partitions are realigned to 64 KiB boundaries.
+* **OTA from an older build will not boot once enabled** — such devices must be
+  re-flashed over serial and fully re-provisioned. Wi-Fi credentials, HomeKit
+  pairing and HomeKey reader enrolment are erased when the flash is first
+  encrypted.
 * Generate the signing key once and keep it safe:
   `espsecure.py generate_signing_key --version 1 keys/secure_boot_signing_key.pem`
   (the original ESP32 only supports Secure Boot V1, which needs an ECDSA-P256 key).
 * `keys/` and `*.pem` are now gitignored so the private key cannot be committed.
-* **Flash with `idf.py encrypted-flash`**, not `idf.py flash`. The plain path writes
-  a plaintext image and the app aborts with
-  `Flash encryption eFuse bit was not enabled in bootloader but CONFIG_SECURE_FLASH_ENC_ENABLED is on`.
-  The chip is not damaged; the eFuses are simply still unburned.
 
-**Enabling it is a one-time, per-device decision. Three options:**
+**Path 1 / Path 2:**
 
-| # | Option | What it does | Reversible? |
-| --- | --- | --- | --- |
-| **1** | **Release mode** — `CONFIG_SECURE_FLASH_ENCRYPTION_MODE_RELEASE=y` | Burns the eFuses, encrypts the flash, Secure Boot locks to your signing key. Encrypted + signed images only. | ❌ **Permanent** |
-| **2** | **Development mode** — `CONFIG_SECURE_FLASH_ENCRYPTION_MODE_DEVELOPMENT=y` | Same first-boot eFuse burn and in-place encryption, but plaintext re-flashing stays possible, so the pipeline can be validated on real hardware. | ✅ Yes (flashing workflow) |
-| **3** | **Back out** — `CONFIG_SECURE_FLASH_ENC_ENABLED=n` | No eFuses burned, no encryption; behaves like upstream. | ✅ Yes |
+| Path | What it does | Reversible? |
+| --- | --- | --- |
+| **Path 1 — default** | No eFuses burned, no encryption. Behaves like upstream; plaintext flashing works normally. | ✅ Yes |
+| **Path 2 — deferred** | Burns the eFuses, encrypts the flash, Secure Boot locks to your signing key. Encrypted + signed images only. | ❌ **Permanent** |
 
-The default in `sdkconfig.defaults` is **option 2 (development mode)**; use option 1
-for production images. Options 1 and 2 both burn `FLASH_CRYPT_CNT` on first boot, so
-the eFuse itself is never reversible — see
-[Choosing how to enable it](docs/content/security.md#choosing-how-to-enable-it-three-options).
+`sdkconfig.defaults` ships with **Path 1**. See
+[Security Rollout Plan: Path 1 → Path 2](docs/content/PATH2_SECURITY_ROLLOUT.md)
+for the staged procedure and its prerequisites.
 
 ### Household & multi-node
 

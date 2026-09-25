@@ -5,11 +5,10 @@ weight: 5
 
 # Keeping Your HomeKey-ESP32 Fresh!
 
-> [!IMPORTANT]
-> **This fork cannot be updated over the air from upstream firmware.** The partition
-> layout changed and Secure Boot is enabled, so an OTA from an older/upstream build
-> will not boot — a serial flash is required. See [Fork vs Upstream](fork-vs-upstream)
-> and the breaking-change section below.
+> [!NOTE]
+> **Updating from upstream firmware requires a serial flash.** This fork accepts
+> upstream's partition layout by default, but the household schema migration is not
+> OTA-compatible in all cases — see the section below.
 
 This document outlines different methods for updating the firmware on your HomeKey-ESP32 device. Keeping your device up-to-date ensures you have the latest features, bug fixes, and security enhancements.
 
@@ -18,11 +17,16 @@ This document outlines different methods for updating the firmware on your HomeK
 >
 > However, if you're interested in what the new version brings, this guide is for you.
 
-## ⚠️ Breaking change in 0.10.0 — flash encryption and Secure Boot
+## Security hardening is available but not enabled
 
-Version `0.10.0` (this fork) enables **flash encryption**, **Secure Boot V1** and **NVS encryption**, and changes the partition layout. This has consequences you must plan for:
+Version `0.10.0` (this fork) **implements** flash encryption, Secure Boot V1 and NVS
+encryption, but ships with them **disabled** so the board stays fully reversible.
+Nothing is destroyed on upgrade and no eFuses are burned.
 
-* **OTA is not possible from an older build.** The partition table moved (`0xD000`), an `nvs_keys` partition was added and the app partitions were realigned, so a network update will not boot. **A serial flash (`idf.py flash` / `esptool`) is required.**
+Enabling the hardening is a **separate, deferred, one-way decision**. If and when you
+take it, these consequences apply:
+
+* **OTA is not possible from an older build.** The partition table moves to `0xD000`, an `nvs_keys` partition is added and the app partitions are realigned, so a network update will not boot. **A serial flash (`idf.py flash` / `esptool`) is required.**
 * **Existing device data is erased.** Wi-Fi credentials, HomeKit pairing and HomeKey reader enrolment stored on the device are lost when the flash is first encrypted; the device must be re-provisioned from scratch.
 * **Every future image must be signed.** Generate a Secure Boot signing key once and keep it safe - losing it means the device can no longer be updated:
 
@@ -31,19 +35,28 @@ Version `0.10.0` (this fork) enables **flash encryption**, **Secure Boot V1** an
   ```
 
 * **Back up first.** Export the household recovery secret and note your configuration before upgrading.
-* **Flash with the encrypted path.** With Secure Boot enabled, `idf.py flash` writes a plaintext image and the app boot-loops with `Flash encryption eFuse bit was not enabled in bootloader but CONFIG_SECURE_FLASH_ENC_ENABLED is on`. Use `idf.py encrypted-flash` instead.
 
-### Pick a mode before you flash
+Do not improvise this. Follow
+**[Security Rollout Plan: Path 1 → Path 2](PATH2_SECURITY_ROLLOUT)**, which stages the
+changes (flash encryption → NVS encryption → Secure Boot → release mode) and verifies
+each one on hardware before the next.
+* **Flash with the right path.** If the device is built with flash encryption enabled, `idf.py flash` writes a plaintext image and the app can boot-loop with `Flash encryption eFuse bit was not enabled in bootloader but CONFIG_SECURE_FLASH_ENC_ENABLED is on`. Once a key is actually burned, plaintext re-flashing and `idf.py encrypted-app-flash` are the supported routes in Development mode. See [Security](security) for the details.
 
-| # | Option | What it does | Reversible? |
-| --- | --- | --- | --- |
-| **1** | **Release mode** — `CONFIG_SECURE_FLASH_ENCRYPTION_MODE_RELEASE=y` | Burns the eFuses, encrypts the flash, Secure Boot locks to your signing key. Encrypted + signed images only. | ❌ **Permanent** |
-| **2** | **Development mode** — `CONFIG_SECURE_FLASH_ENCRYPTION_MODE_DEVELOPMENT=y` | Same first-boot eFuse burn and in-place encryption, but plaintext re-flashing stays possible, so the pipeline can be validated on real hardware. | ✅ Yes (flashing workflow) |
-| **3** | **Back out** — `CONFIG_SECURE_FLASH_ENC_ENABLED=n` | No eFuses burned, no encryption; behaves like upstream. | ✅ Yes |
+### Pick a path before you flash
 
-**Use option 2 on the first device.** Options 1 and 2 both burn `FLASH_CRYPT_CNT`, so the eFuse itself is never reversible — "reversible" means you can keep re-flashing plaintext while developing.
+This fork currently ships with flash encryption and Secure Boot **disabled**
+("Path 1") so that the board stays fully reversible while the firmware is
+validated. Enabling them is **Path 2**, a deferred one-way rollout.
 
-See [Security](security#choosing-how-to-enable-it-three-options) for the full details.
+| Path | What it does | Reversible? |
+| --- | --- | --- |
+| **Path 1 — current** | No eFuses burned, no encryption. Behaves like upstream; plaintext flashing works normally. | ✅ Yes |
+| **Path 2 — deferred** | Burns the eFuses, encrypts the flash, Secure Boot locks the device to your signing key. Encrypted + signed images only. | ❌ **Permanent** |
+
+See **[Security Rollout Plan: Path 1 → Path 2](PATH2_SECURITY_ROLLOUT)** for the
+staged procedure, prerequisites and irreversible consequences, and
+[Security](security#choosing-how-to-enable-it-path-1-or-path-2) for the config
+options.
 
 **Required Files for Updates:**
 

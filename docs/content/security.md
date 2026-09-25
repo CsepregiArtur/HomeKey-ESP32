@@ -8,15 +8,19 @@ HomeKey-ESP32 controls a door lock, so it is worth being explicit about what it 
 > [!IMPORTANT]
 > **The security model differs from upstream.** [rednblkx/HomeKey-ESP32](https://github.com/rednblkx/HomeKey-ESP32)
 > deliberately ships with **flash encryption and Secure Boot disabled** so existing
-> users never have to re-provision. **This fork enables flash encryption, Secure
-> Boot V1 and NVS encryption**, which changes the physical-access threat model and
-> makes a serial re-flash mandatory. See [Fork vs Upstream](fork-vs-upstream#4-security-model--the-biggest-difference).
+> users never have to re-provision. **This fork implements flash encryption, Secure
+> Boot V1 and NVS encryption, but also ships with them disabled by default** so the
+> board stays fully reversible. Turning them on changes the physical-access threat
+> model and makes a serial re-flash mandatory; it is a deferred, staged, one-way
+> rollout described in
+> [Security Rollout Plan: Path 1 → Path 2](PATH2_SECURITY_ROLLOUT). See also
+> [Fork vs Upstream](fork-vs-upstream#4-security-model--the-biggest-difference).
 
 ## Threat model
 
 | Attacker has... | Can they get in? | Notes |
 | --- | --- | --- |
-| Physical access to the device (USB/serial) | **Reading secrets: no. Reflashing: no.** | Flash encryption and Secure Boot V1 are enabled, so the stored reader keys, HAP pairing keys, Wi-Fi credentials and NVS contents are ciphertext, and only signed firmware boots. Physical access is still a **denial-of-service** risk. See [Physical access](#physical-access). |
+| Physical access to the device (USB/serial) | **Depends on the rollout.** | With the default (Path 1) configuration, flash is plaintext exactly like upstream, so secrets are readable. Once Path 2 is executed, the stored reader keys, HAP pairing keys, Wi-Fi credentials and NVS contents become ciphertext and only signed firmware boots. Physical access is a **denial-of-service** risk either way. See [Physical access](#physical-access). |
 | A device on the same network (LAN/Wi-Fi/guest VLAN) | **Depends on your settings** | With Web UI authentication enabled, reading/writing the configuration requires the Web UI password. Without it, everything below is open. |
 | Access to your MQTT broker | **Potentially, yes** | Anyone who can publish to the lock's command topics can unlock the door unless the broker enforces authentication and per-device ACLs. See [MQTT](#mqtt-is-an-unlock-path-treat-it-like-one). |
 | A browser on the same network (malicious web page) | **No** | Requests are rejected unless the `Host` header names the device (DNS rebinding / CSRF protection), and all state-changing endpoints are POST-only. |
@@ -136,7 +140,12 @@ This fork enables all three, unlike upstream:
 | --- | --- | --- |
 | Flash encryption | `CONFIG_SECURE_FLASH_ENC_ENABLED` | The whole flash (app, NVS, LittleFS) is AES-encrypted with a per-device key in eFuse BLK1, unreadable from software. |
 | Encrypted NVS | `CONFIG_NVS_ENCRYPTION` + `CONFIG_SECURE_FLASH_ENC_USE_ENCRYPTED_NVS` | NVS keys live in the dedicated `nvs_keys` partition. Wi-Fi credentials, HomeKey reader material and all configuration are ciphertext. |
-| Secure Boot V1 | `CONFIG_SECURE_BOOT` + `CONFIG_SECURE_BOOT_V1_ENABLED` | The bootloader and app must be signed with the RSA/ECDSA key whose digest is burned into eFuse BLK2. Only signed firmware boots. |
+| Secure Boot V1 | `CONFIG_SECURE_BOOT` + `CONFIG_SECURE_BOOT_V1_ENABLED` | The bootloader and app must be signed with the key whose digest is burned into eFuse BLK2. Only signed firmware boots. |
+
+> [!IMPORTANT]
+> **All three of these are currently DISABLED in `sdkconfig.defaults`.** The
+> settings below describe what enabling them does; the actual staged procedure
+> lives in **[Security Rollout Plan: Path 1 → Path 2](PATH2_SECURITY_ROLLOUT)**.
 
 The original ESP32 only supports **Secure Boot V1**, which requires an **ECDSA-P256** key; RSA-based Secure Boot V2 is not available on this chip.
 
@@ -156,27 +165,34 @@ The original ESP32 only supports **Secure Boot V1**, which requires an **ECDSA-P
 >
 > Back up your household recovery secret and configuration before flashing.
 
-### Choosing how to enable it: three options
+### Choosing how to enable it: Path 1 or Path 2
 
 Enabling this is a **one-time decision per device**, and the mode you pick decides
 how much freedom you keep. Pick deliberately — the eFuse burn cannot be undone.
 
+> [!IMPORTANT]
+> **This fork currently ships with both features DISABLED ("Path 1").** The board
+> is fully reversible and no eFuse has been burned. Turning them on is **Path 2**,
+> a deferred one-way rollout with its own staged procedure and prerequisites:
+> see **[Security Rollout Plan: Path 1 → Path 2](PATH2_SECURITY_ROLLOUT)**.
+> Do not enable anything below until that document's prerequisites are met.
+
 | # | Option | What it does | Reversible? |
 | --- | --- | --- | --- |
 | **1** | **Release mode**<br>`CONFIG_SECURE_FLASH_ENCRYPTION_MODE_RELEASE=y` | Burns the eFuses, encrypts the flash, and Secure Boot locks the device to your signing key. Encrypted + signed images only. | ❌ **Permanent** |
-| **2** | **Development mode**<br>`CONFIG_SECURE_FLASH_ENCRYPTION_MODE_DEVELOPMENT=y` | Same first-boot eFuse burn and in-place encryption, but plaintext re-flashing stays possible (ESP-IDF warns and re-encrypts). Lets you validate the encrypt → sign → flash pipeline on real hardware. | ✅ Yes (for the flashing workflow) |
-| **3** | **Back out**<br>`CONFIG_SECURE_FLASH_ENC_ENABLED=n` | No eFuses burned, no encryption. The device behaves like upstream and plaintext flashing works normally — but you lose all the at-rest protection. | ✅ Yes |
+| **2** | **Development mode**<br>`CONFIG_SECURE_FLASH_ENCRYPTION_MODE_DEVELOPMENT=y` | Same first-boot eFuse burn and in-place encryption, but plaintext re-flashing stays possible (ESP-IDF warns and re-encrypts). Lets you validate the encrypt → sign → flash pipeline on real hardware. | ⚠️ Flash yes, **key no** |
+| **3** | **Back out**<br>`CONFIG_SECURE_FLASH_ENC_ENABLED=n` | No eFuses burned, no encryption. The device behaves like upstream and plaintext flashing works normally — but you lose all the at-rest protection. | ✅ Yes — **this is the current state** |
 
 ```ini
 # Option 1 — production images
 CONFIG_SECURE_FLASH_ENC_ENABLED=y
 CONFIG_SECURE_FLASH_ENCRYPTION_MODE_RELEASE=y
 
-# Option 2 — validate the pipeline first (recommended for the first device)
+# Option 2 — validate the pipeline first (stage 1 of the Path 2 rollout)
 CONFIG_SECURE_FLASH_ENC_ENABLED=y
 CONFIG_SECURE_FLASH_ENCRYPTION_MODE_DEVELOPMENT=y
 
-# Option 3 — back out entirely, behave like upstream
+# Option 3 — back out entirely, behave like upstream (CURRENT)
 # CONFIG_SECURE_FLASH_ENC_ENABLED is not set
 ```
 
@@ -188,10 +204,15 @@ CONFIG_SECURE_FLASH_ENCRYPTION_MODE_DEVELOPMENT=y
 > development to release mode later does **not** re-enable plaintext flashing once
 > the eFuse is spent — the setting only controls what the build and flasher allow.
 >
-> Because of this, **Option 2 is the recommended path for the first device**: it
-> proves the whole pipeline works before you commit a fleet to release mode.
+> The flash-encryption key itself is **never** recoverable once burned. Back it up
+> off-machine before Stage 1 of the rollout.
+>
+> Because of this, the rollout in
+> **[Security Rollout Plan: Path 1 → Path 2](PATH2_SECURITY_ROLLOUT)** proceeds in
+> stages — flash encryption first, then NVS encryption, then Secure Boot, then
+> release mode — verifying each before starting the next.
 
-#### Flashing with Secure Boot: a common pitfall
+#### Flashing with encryption enabled: a common pitfall
 
 `idf.py flash` writes a **plaintext** image. If the firmware was built with
 `CONFIG_SECURE_FLASH_ENC_ENABLED=y` on a device whose `FLASH_CRYPT_CNT` is still
@@ -207,15 +228,25 @@ That is a **precondition check, not corruption** — the chip is fine and the eF
 are untouched. Confirm with:
 
 ```bash
-espefuse.py -p /dev/cu.usbserial-0001 summary | grep -E "FLASH_CRYPT_CNT|ABS_DONE"
+idf.py -p /dev/cu.usbserial-0001 efuse-summary
 # FLASH_CRYPT_CNT = 0b0000000   -> nothing burned yet
+# BLOCK1 (flash encryption key) -> empty
+# ABS_DONE_0 = False           -> no Secure Boot
 ```
 
-Then use the encrypted flashing path instead of the plain one:
+> [!WARNING]
+> **`idf.py encrypted-flash` will NOT fix this on a chip with no key burned.** It
+> fails with *"Flash encryption key is not programmed"* / *"Can't perform encrypted
+> flash write"*, because it needs a key that does not exist yet.
+>
+> There is also **no `idf.py flash-encrypt` command** — that target does not exist.
+> The real ones are `encrypted-flash`, `encrypted-app-flash`, `efuse-burn-key`,
+> `efuse-burn`, `efuse-summary` and `secure-generate-flash-encryption-key`.
 
-```bash
-idf.py -p /dev/cu.usbserial-0001 encrypted-flash
-```
+On a virgin chip, enabling encryption requires the eFuse to be burned first.
+Follow **[Security Rollout Plan: Path 1 → Path 2](PATH2_SECURITY_ROLLOUT)** rather
+than improvising — it walks through the key generation, the eFuse burn, and the
+staged verification in the order ESP-IDF expects.
 
 ## Physical access
 

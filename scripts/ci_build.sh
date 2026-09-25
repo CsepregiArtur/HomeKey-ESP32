@@ -2,16 +2,22 @@
 #
 # CI build helper for the HomeKey-ESP32 fork.
 #
-# The fork enables flash encryption + Secure Boot V1 + NVS encryption, which
-# means Secure Boot needs a signing key at `keys/secure_boot_signing_key.pem`
-# (configured via CONFIG_SECURE_BOOT_SIGNING_KEY). That file is gitignored, so
-# this script creates one when it is missing.
+# The fork *supports* flash encryption + Secure Boot V1 + NVS encryption, but
+# they are DISABLED in sdkconfig.defaults by default ("Path 1") so the board
+# stays fully reversible. While they are off, `idf.py build` produces a normal
+# plaintext, unsigned image and no signing key is needed at all.
+#
+# When the hardening is eventually enabled ("Path 2", see
+# docs/content/PATH2_SECURITY_ROLLOUT.md), Secure Boot needs a signing key at
+# `keys/secure_boot_signing_key.pem` (configured via
+# CONFIG_SECURE_BOOT_SIGNING_KEY). That file is gitignored, so this script
+# creates one when it is missing.
 #
 # ⚠️  The fallback key is EPHEMERAL: it is generated fresh on every CI run, so
 #     images built with it will only boot on a device whose eFuses have not been
-#     burned with a different key. To publish actually flashable releases, set
-#     the `SECURE_BOOT_SIGNING_KEY` repository secret to the base64-encoded PEM
-#     of your real key (see docs/content/security.md).
+#     burned with a different key. To publish actually flashable releases once
+#     Secure Boot is on, set the `SECURE_BOOT_SIGNING_KEY` repository secret to
+#     the base64-encoded PEM of your real key (see docs/content/security.md).
 #
 # Runs inside the espressif/esp-idf-ci-action container, where espsecure.py is
 # already available. Note that the action may invoke this file with `sh` rather
@@ -37,7 +43,11 @@ if [ -f "${KEY_PATH}" ]; then
       | sed 's/^/    /'
   fi
 else
-  echo "::warning title=THROWAWAY SIGNING KEY::${KEY_PATH} not found, so this build is signed with a throwaway ECDSA-P256 key. It only boots on a device with unburned eFuses; set the SECURE_BOOT_SIGNING_KEY secret to publish flashable images."
+  if grep -qE '^CONFIG_SECURE_BOOT=y' sdkconfig 2>/dev/null; then
+    echo "::warning title=THROWAWAY SIGNING KEY::${KEY_PATH} not found but CONFIG_SECURE_BOOT=y, so this build is signed with a throwaway ECDSA-P256 key. It only boots on a device with unburned eFuses; set the SECURE_BOOT_SIGNING_KEY secret to publish flashable images."
+  else
+    echo "::notice title=Secure Boot::Secure Boot is disabled (Path 1), so no signing key is needed for this build."
+  fi
   espsecure.py generate_signing_key --version 1 "${KEY_PATH}"
 fi
 

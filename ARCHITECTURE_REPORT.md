@@ -6,10 +6,14 @@
 > Household multi-node architecture, authenticated MQTT control and encrypted
 > storage. See the [README](README.md) for the full list of additions.
 >
-> **Storage:** flash encryption, Secure Boot V1 and NVS encryption are enabled
-> (`sdkconfig.defaults`), so app, NVS and LittleFS contents are encrypted at rest
-> and only signed firmware boots. This is irreversible and requires a serial
-> re-flash of existing devices — see [Security](docs/content/security.md).
+> **Storage:** flash encryption, Secure Boot V1 and NVS encryption are **supported but
+> disabled by default** (`sdkconfig.defaults`), so the board is fully reversible today:
+> no eFuses are burned and the flash is plaintext, matching upstream. Enabling them is
+> a deferred, one-way rollout documented in
+> [Security Rollout Plan: Path 1 → Path 2](docs/content/PATH2_SECURITY_ROLLOUT.md);
+> when enabled the app, NVS and LittleFS contents are encrypted at rest and only signed
+> firmware boots, at the cost of a serial re-flash and full re-provisioning of
+> existing devices.
 
 This report is the inspection deliverable required before implementing the multi-node
 "HomeKey Household" architecture. It documents what exists today, what must be
@@ -20,7 +24,8 @@ preserved, and how the new modules map onto the current codebase.
 > `0.9.0`; sections describing household, backup, provisioning, security posture
 > and the MQTT household namespace are **new in this fork**. See
 > [Fork vs Upstream](docs/content/fork-vs-upstream.md) for the comparison table and
-> [Security](docs/content/security.md) for the flash-encryption / Secure Boot change.
+> [Security Rollout Plan: Path 1 → Path 2](docs/content/PATH2_SECURITY_ROLLOUT.md)
+> for the flash-encryption / Secure Boot change (currently disabled).
 
 ## 1. Current architecture (verified in source)
 

@@ -30,11 +30,11 @@ functionality. Everything below explains **only what this fork changes**.
 | MQTT | Single-device legacy topics | **Additive** structured household namespace + HA discovery |
 | MQTT commands | Plain numeric payloads | **HMAC-SHA256 authenticated** `command/lock` \| `command/unlock` |
 | Web UI pages | Misc, MQTT, OTA, Logs, Actions… | **+ household, node, health, security, audit, backup, recovery, provision** |
-| Flash encryption | Disabled (deliberate) | **Enabled** |
-| Secure Boot | Disabled | **Enabled (V1, ECDSA-P256)** |
-| NVS encryption | Disabled | **Enabled** (`nvs_keys` partition) |
-| Partition table | `0x8000`, no `nvs_keys` | **`0xD000`, with `nvs_keys`** |
-| OTA sources | ArduinoOTA / HomeSpan / Web UI | Same, **plus Secure Boot signing required** |
+| Flash encryption | Disabled (deliberate) | **Implemented, off by default** |
+| Secure Boot | Disabled | **Implemented, off by default** (V1, ECDSA-P256 when enabled) |
+| NVS encryption | Disabled | **Implemented, off by default** (`nvs_keys` partition when enabled) |
+| Partition table | `0x8000`, no `nvs_keys` | **Same as upstream by default**; moves to `0xD000` with `nvs_keys` when hardening is enabled |
+| OTA sources | ArduinoOTA / HomeSpan / Web UI | Same, **plus Secure Boot signing required once the hardening is enabled** |
 | Audit log | — | Bounded 256-record NVS-backed log |
 | Health reporting | — | Aggregated health snapshot |
 
@@ -104,50 +104,42 @@ See [MQTT Household API](mqtt_household_api) and
 ## 4. Security model — the biggest difference
 
 > [!CAUTION]
-> **This fork enables flash encryption, Secure Boot V1 and NVS encryption.
-> Upstream deliberately does not.** This is irreversible and destroys data on
-> existing devices.
+> **This fork *implements* flash encryption, Secure Boot V1 and NVS encryption.
+> Upstream deliberately does not.** They are **disabled by default** in this fork
+> so the board stays reversible; turning them on is a deferred, one-way rollout
+> described in [Security Rollout Plan: Path 1 → Path 2](PATH2_SECURITY_ROLLOUT).
+> Once enabled it is irreversible and destroys data on existing devices.
 
 | Protection | Upstream `0.9.0` | This fork `0.10.0` |
 | --- | --- | --- |
-| Flash encryption | **No** — flash is plaintext; the reader keys, HAP pairing keys and Wi-Fi credentials can be read over serial | **Yes** — app, NVS and LittleFS are AES-encrypted with a per-device eFuse key |
-| Secure Boot | No — arbitrary firmware can be flashed | **Yes, V1 (ECDSA-P256)** — only signed firmware boots |
-| NVS encryption | No (`nvs_keys` partition absent) | **Yes** — via a new `nvs_keys` partition |
-| Physical access outcome | Total compromise: secrets readable, firmware swappable | Secrets unreadable; firmware must be signed. DoS remains possible |
+| Flash encryption | **No** — flash is plaintext; the reader keys, HAP pairing keys and Wi-Fi credentials can be read over serial | **Supported, currently off** — switchable on with a per-device eFuse key; see the rollout plan |
+| Secure Boot | No — arbitrary firmware can be flashed | **Supported, currently off** — V1 (ECDSA-P256) when enabled; only signed firmware boots |
+| NVS encryption | No (`nvs_keys` partition absent) | **Supported, currently off** — uses a new `nvs_keys` partition when enabled |
+| Right now | Plaintext flash, plaintext NVS | **Identical to upstream for day-to-day use** — no eFuses burned, no data loss |
 
 Upstream's reasoning was that enabling these would force every existing user to
-re-flash and reconfigure. **This fork accepts that cost** in exchange for
-at-rest protection — which means:
+re-flash and reconfigure. This fork **agrees that it is not a step to take
+casually**, so the hardening is implemented but staged as a deliberate, verifiable
+rollout rather than a default:
 
-- **OTA from upstream/older builds will not boot.** The partition table moved
-  (`0x8000` → `0xD000`), an `nvs_keys` partition was added, and app partitions were
+| Path | What it does | Reversible? |
+| --- | --- | --- |
+| **Path 1 — current** | No eFuses burned, no encryption. Behaves like upstream; plaintext flashing works normally. | ✅ Yes |
+| **Path 2 — deferred** | Burns the eFuses, encrypts the flash, Secure Boot locks the device to your signing key. Encrypted + signed images only. | ❌ **Permanent** |
+
+The full staged procedure, its prerequisites and its consequences are in
+**[Security Rollout Plan: Path 1 → Path 2](PATH2_SECURITY_ROLLOUT)**. Start there
+before touching any security config.
+
+When Path 2 is executed, be aware that:
+
+- **OTA from upstream/older builds will not boot.** The partition table moves
+  (`0x8000` → `0xD000`), an `nvs_keys` partition is added, and app partitions are
   realigned to 64 KiB boundaries. A **serial flash is required**.
 - **Existing device data is erased** when the flash is first encrypted: Wi-Fi
   credentials, HomeKit pairing and HomeKey reader enrolment.
 - Every future image must be signed with the same key. Generate it once and keep it
-  safe, or the device can never be updated again.
-
-### Three ways to enable it
-
-Enabling is a one-time decision per device. The mode you choose decides how much
-freedom you keep — see
-[Choosing how to enable it](security#choosing-how-to-enable-it-three-options) for
-the full detail.
-
-| # | Option | What it does | Reversible? |
-| --- | --- | --- | --- |
-| **1** | **Release mode** — `CONFIG_SECURE_FLASH_ENCRYPTION_MODE_RELEASE=y` | Burns the eFuses, encrypts the flash, Secure Boot locks to your signing key. Encrypted + signed images only. | ❌ **Permanent** |
-| **2** | **Development mode** — `CONFIG_SECURE_FLASH_ENCRYPTION_MODE_DEVELOPMENT=y` | Same first-boot eFuse burn and in-place encryption, but plaintext re-flashing stays possible, so the pipeline can be validated on real hardware. | ✅ Yes (flashing workflow) |
-| **3** | **Back out** — `CONFIG_SECURE_FLASH_ENC_ENABLED=n` | No eFuses burned, no encryption; behaves like upstream. | ✅ Yes |
-
-**Option 2 is the recommended path for the first device.** Note that options 1 and 2
-both burn `FLASH_CRYPT_CNT` on first boot, so the eFuse itself is never reversible —
-"reversible" here means you can keep re-flashing plaintext images while developing.
-
-Using Secure Boot also changes how you flash: `idf.py flash` writes a plaintext image
-and will boot-loop with
-`Flash encryption eFuse bit was not enabled in bootloader but CONFIG_SECURE_FLASH_ENC_ENABLED is on`.
-Use `idf.py encrypted-flash` instead.
+  safe off-machine, or the device can never be updated again.
 
 See [Security](security#flash-encryption-secure-boot-and-nvs-encryption) and
 [Updates](updates).
@@ -168,14 +160,19 @@ To be explicit, this fork does **not** touch:
 ## 6. Migrating from upstream
 
 1. **Back up** your household recovery secret and note your configuration.
-2. Generate a Secure Boot signing key:
-   `espsecure.py generate_signing_key --version 1 keys/secure_boot_signing_key.pem`
-3. Flash over **serial** (not OTA) — see [Updates](updates).
-4. Re-provision: Wi-Fi, HomeKit pairing and HomeKey enrolment are gone.
-5. Re-add HomeKey credentials in the Apple Home app.
+2. Flash over **serial** — see [Updates](updates).
+3. Re-provision: Wi-Fi, HomeKit pairing and HomeKey enrolment are reset by the
+   partition-layout change.
+4. Re-add HomeKey credentials in the Apple Home app.
+
+> Enabling the security features is a **separate, deferred step**. Do not generate a
+> signing key or burn eFuses as part of a normal migration — follow
+> **[Security Rollout Plan: Path 1 → Path 2](PATH2_SECURITY_ROLLOUT)** when you are
+> ready for that.
 
 ## Related pages
 
+- [Security Rollout Plan: Path 1 → Path 2](PATH2_SECURITY_ROLLOUT)
 - [Household & Node Architecture](household)
 - [MQTT Household API](mqtt_household_api)
 - [MQTT API Contract Matrix](mqtt_api_contract_matrix)
