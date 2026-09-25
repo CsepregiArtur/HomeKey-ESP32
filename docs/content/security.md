@@ -95,7 +95,51 @@ Put the lock on an IoT SSID or VLAN that cannot reach your computers, and block 
 
 ### Verify OTA images
 
-OTA image signature verification is **enabled by default** in this fork, as part of Secure Boot V1 (see below). Every image the device accepts - whether flashed or uploaded over the network - must be signed with the Secure Boot signing key.
+**A build from the committed `sdkconfig.defaults` verifies nothing.** That default is "Path 1"
+- nothing enabled, no eFuses burned, plaintext flashing keeps working - so app images are
+unsigned and the security posture reports `ota_signature: WARNING`. A firmware upload is
+therefore whatever anybody manages to send; nothing checks where it came from.
+
+There are two ways to change that, and they use the same ECDSA-P256 key.
+
+#### Signed images without Secure Boot (no eFuses, fully reversible)
+
+This authenticates every *update* without walking through the one-way door:
+
+```ini
+# In the build's own sdkconfig. Putting these in sdkconfig.defaults makes them apply to
+# everyone who builds the project - including contributors with no key - so do that only
+# deliberately.
+CONFIG_SECURE_SIGNED_APPS_NO_SECURE_BOOT=y
+CONFIG_SECURE_SIGNED_APPS_ECDSA_SCHEME=y
+CONFIG_SECURE_SIGNED_ON_UPDATE_NO_SECURE_BOOT=y
+# CONFIG_SECURE_SIGNED_ON_BOOT_NO_SECURE_BOOT is not set
+CONFIG_SECURE_BOOT_BUILD_SIGNED_BINARIES=y
+CONFIG_SECURE_BOOT_SIGNING_KEY="keys/secure_boot_signing_key.pem"
+```
+
+The build signs the app itself - the log says `Signed N bytes of data from
+.../HomeKey-ESP32-unsigned.bin` - and embeds the matching public key in it, so the running
+firmware refuses any OTA image that was not signed with your key. Nothing is burned: USB
+flashing keeps working, and reverting means building without these options again.
+
+Verified on hardware (ESP32-D0WD-V3, 2026-09-25): the posture went from
+five findings to four, with `ota_signature: OK` among them.
+
+Know these consequences before switching it on:
+
+* **Every OTA image you upload must be signed.** Your own `idf.py` builds are, because they
+  use these settings.
+* **Release images built from the committed defaults are not**, so a device with verification
+  enabled will refuse them over OTA. Flash over USB instead, or sign the file first:
+  `espsecure.py sign_data --version 1 --keyfile keys/secure_boot_signing_key.pem <image>`.
+* Keep the key. Losing it does not brick the device - flashing a new build over USB with a
+  different key still works - but it ends OTA for that device.
+
+#### Secure Boot V1 (one-way)
+
+This is the strongest option: it also verifies the bootloader and the app at boot, which
+needs `CONFIG_SECURE_BOOT=y` and burns eFuses. Its configuration looks like this:
 
 ```ini
 CONFIG_SECURE_BOOT=y

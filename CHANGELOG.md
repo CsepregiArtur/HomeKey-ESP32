@@ -7,6 +7,12 @@ Notable changes per release. User-facing detail lives in the docs:
 
 ### Added
 
+* **Verify OTA images without burning eFuses.** The "signed apps without Secure Boot"
+  configuration - and what it implies for updates - is documented in
+  [Security](docs/content/security.md#verify-ota-images), with hardware evidence: enabling it
+  took the same device from five security findings to four, `ota_signature` among those
+  resolved, with no eFuse burned and USB flashing still working.
+
 * **Restore a backup from the Web UI.** **Recovery → Restore from a backup** takes the backup
   file (or pasted hex) and the offline recovery secret and restores household membership and
   configuration onto a replacement node. The endpoint already existed but had no interface, so
@@ -47,6 +53,10 @@ Notable changes per release. User-facing detail lives in the docs:
   station side, not on a short-lived setup AP.
 
 ### Fixed
+
+* **Corrected a security doc claim.** The "Verify OTA images" section said image
+  verification was enabled by default; a build from the committed defaults verifies
+  nothing and reports `ota_signature: WARNING`, which is now what the section says.
 
 * **The Web UI returned `404 Nothing matches the given URI` for most URLs.** The HTTP server
   was configured with `max_uri_handlers = 22`, but the main route table registers 28
