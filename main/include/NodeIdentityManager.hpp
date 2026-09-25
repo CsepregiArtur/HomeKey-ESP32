@@ -34,9 +34,12 @@ public:
     bool createReplacementIdentity(household::NodeRole role, const std::string &name,
                                    const std::string &householdId, uint8_t oldGeneration);
 
-    void setHousehold(const std::string &householdId);
-    void setState(household::NodeState state);
-    void setRole(household::NodeRole role);
+    /// Each of these writes NVS immediately and reports whether that write landed, so
+    /// a caller doing several in a row cannot report success for a node whose identity
+    /// never reached storage.
+    bool setHousehold(const std::string &householdId);
+    bool setState(household::NodeState state);
+    bool setRole(household::NodeRole role);
 
     /// Ed25519-detached signature over `message`, using the device private key.
     std::vector<uint8_t> sign(const std::vector<uint8_t> &message) const;

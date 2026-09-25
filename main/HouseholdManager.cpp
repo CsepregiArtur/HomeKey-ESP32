@@ -108,7 +108,7 @@ void HouseholdManager::migrate() {
              household::CONFIG_VERSION_CURRENT);
 }
 
-void HouseholdManager::joinHousehold(const std::string &id, const std::string &name,
+bool HouseholdManager::joinHousehold(const std::string &id, const std::string &name,
                                      const std::vector<uint8_t> &trustKey) {
     m_info.household_id = id;
     m_info.household_name = name;
@@ -118,7 +118,15 @@ void HouseholdManager::joinHousehold(const std::string &id, const std::string &n
     m_info.state = household::HouseholdState::PROVISIONING;
     m_info.config_version = household::CONFIG_VERSION_CURRENT;
     ensureRecoverySecret();
-    save();
+    // Reported rather than ignored: this write is what makes the membership survive a
+    // reboot, and a household stuck at PROVISIONING is what swallowing the result of it
+    // looks like from the outside.
+    const bool stored = save();
+    if (!stored) {
+        ESP_LOGE(TAG, "Household %s was joined in memory but could not be stored; the "
+                      "device will not be a member after a reboot.",
+                 id.c_str());
+    }
     EventHouseholdState ev{};
     ev.state = static_cast<uint8_t>(m_info.state);
     ev.household_id = m_info.household_id;
@@ -127,6 +135,7 @@ void HouseholdManager::joinHousehold(const std::string &id, const std::string &n
     alpaca::serialize(ev, buf);
     AppEventLoop::publish(HOUSEHOLD_EVENT, HOUSEHOLD_MEMBERSHIP_CHANGED, buf.data(), buf.size());
     ESP_LOGI(TAG, "Joined household %s (PROVISIONING)", id.c_str());
+    return stored;
 }
 
 bool HouseholdManager::restoreHousehold(const std::string &id, const std::string &name,
@@ -160,9 +169,17 @@ bool HouseholdManager::restoreHousehold(const std::string &id, const std::string
     return true;
 }
 
-void HouseholdManager::completeProvisioning() {
+bool HouseholdManager::completeProvisioning() {
     m_info.state = household::HouseholdState::ACTIVE;
-    save();
+    const bool stored = save();
+    if (!stored) {
+        // The Web UI and /api/ha/state read the in-memory record, so both would keep
+        // reporting ACTIVE until the next reboot and PROVISIONING after it. Never
+        // announce a state that will not be there then.
+        ESP_LOGE(TAG, "Household %s is ACTIVE in memory but could not be stored.",
+                 m_info.household_id.c_str());
+        return false;
+    }
     EventHouseholdState ev{};
     ev.state = static_cast<uint8_t>(m_info.state);
     ev.household_id = m_info.household_id;
@@ -170,6 +187,8 @@ void HouseholdManager::completeProvisioning() {
     std::vector<uint8_t> buf;
     alpaca::serialize(ev, buf);
     AppEventLoop::publish(HOUSEHOLD_EVENT, HOUSEHOLD_STATE_CHANGED, buf.data(), buf.size());
+    ESP_LOGI(TAG, "Household %s is ACTIVE.", m_info.household_id.c_str());
+    return true;
 }
 
 void HouseholdManager::markRecoveryRequired() {

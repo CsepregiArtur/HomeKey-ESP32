@@ -201,17 +201,19 @@ bool NodeIdentityManager::createReplacementIdentity(household::NodeRole role,
     return true;
 }
 
-void NodeIdentityManager::setHousehold(const std::string &householdId) {
+bool NodeIdentityManager::setHousehold(const std::string &householdId) {
     m_info.household_id = householdId;
-    save();
+    return save();
 }
 
-void NodeIdentityManager::setState(household::NodeState state) {
+bool NodeIdentityManager::setState(household::NodeState state) {
     if (m_info.state == state) {
-        return;
+        return true; // already in that state, so there is nothing to write
     }
     m_info.state = state;
-    save();
+    if (!save()) {
+        return false;
+    }
     EventNodeState ev{};
     ev.state = static_cast<uint8_t>(state);
     ev.node_id = m_info.node_id;
@@ -220,11 +222,12 @@ void NodeIdentityManager::setState(household::NodeState state) {
     std::vector<uint8_t> buf;
     alpaca::serialize(ev, buf);
     AppEventLoop::publish(NODE_EVENT, NODE_STATE_CHANGED, buf.data(), buf.size());
+    return true;
 }
 
-void NodeIdentityManager::setRole(household::NodeRole role) {
+bool NodeIdentityManager::setRole(household::NodeRole role) {
     m_info.node_role = role;
-    save();
+    return save();
 }
 
 std::vector<uint8_t> NodeIdentityManager::sign(const std::vector<uint8_t> &message) const {

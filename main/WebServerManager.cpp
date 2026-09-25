@@ -61,6 +61,7 @@
 #include <cctype>
 #include <cstdio>
 #include <mutex>
+#include <nvs.h>
 #include <esp_tls_crypto.h>
 #include <stdbool.h>
 #include <string>
@@ -4239,11 +4240,36 @@ esp_err_t WebServerManager::handleJoinHousehold(httpd_req_t *req) {
         return sendJsonError(req, "Invalid, expired or already-used provisioning code", "401 Unauthorized");
     }
 
-    instance->m_householdManager->joinHousehold(householdId, householdName, trustKey);
-    instance->m_nodeIdentityManager->setRole(role);
-    instance->m_nodeIdentityManager->setHousehold(householdId);
-    instance->m_nodeIdentityManager->setState(household::NodeState::ACTIVE);
-    instance->m_householdManager->completeProvisioning();
+    // Every one of these five writes is the same write as far as the user is concerned:
+    // the household record. A handler that reports success on a write which did not land
+    // describes a device that looks enrolled until it reboots and unconfigured after -
+    // which is what a household stuck at PROVISIONING is. So each result is checked, and
+    // a failure is reported as a failure rather than as an enrollment.
+    const bool joined = instance->m_householdManager->joinHousehold(householdId, householdName, trustKey);
+    const bool roleStored = instance->m_nodeIdentityManager->setRole(role);
+    const bool householdStored = instance->m_nodeIdentityManager->setHousehold(householdId);
+    const bool nodeActive = instance->m_nodeIdentityManager->setState(household::NodeState::ACTIVE);
+    const bool completed = instance->m_householdManager->completeProvisioning();
+
+    if (!joined || !roleStored || !householdStored || !nodeActive || !completed) {
+        // The usual cause is a full NVS partition. Report the numbers here rather than
+        // making the user attach a serial console to find out why nothing stuck: the
+        // NVS partition is small, and the audit ring takes most of it.
+        nvs_stats_t stats{};
+        nvs_get_stats(nullptr, &stats);
+        ESP_LOGE(TAG,
+                 "Enrollment in household %s was NOT stored (household=%d role=%d "
+                 "node=%d complete=%d; NVS entries used %lu of %lu). After a reboot this "
+                 "device is not a member.",
+                 householdId.c_str(), joined, roleStored, householdStored, completed,
+                 static_cast<unsigned long>(stats.used_entries),
+                 static_cast<unsigned long>(stats.total_entries));
+        return sendJsonError(req,
+                             "The household record could not be stored because the device's "
+                             "non-volatile storage is full, so nothing was enrolled. Reboot "
+                             "and check the log for the NVS entry counts.",
+                             "507 Insufficient Storage");
+    }
     if (instance->m_auditManager) {
         instance->m_auditManager->record(AuditManager::NODE_ENROLLMENT, AuditManager::SOURCE_WEB,
                                          AuditManager::RESULT_SUCCESS,

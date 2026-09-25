@@ -24,7 +24,11 @@ public:
     const household::HouseholdInfo &info() const { return m_info; }
     household::HouseholdState state() const { return m_info.state; }
 
-    void joinHousehold(const std::string &id, const std::string &name,
+    /// Join a household and write the record before returning.
+    ///
+    /// @return true when the membership reached NVS. A caller that ignores this can
+    ///         report success for a device that will look unconfigured after a reboot.
+    bool joinHousehold(const std::string &id, const std::string &name,
                        const std::vector<uint8_t> &trustKey);
 
     /// Restore path: adopt household membership and the caller-supplied recovery
@@ -34,7 +38,9 @@ public:
                           const std::vector<uint8_t> &recoverySecret,
                           const std::vector<uint8_t> &recoverySalt);
 
-    void completeProvisioning();
+    /// Flip PROVISIONING to ACTIVE once the node side has been written too.
+    /// @return true when the new state reached NVS.
+    bool completeProvisioning();
     void markRecoveryRequired();
     void markRevoked();
     void markActive();
