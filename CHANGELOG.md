@@ -49,6 +49,32 @@ Notable changes per release. User-facing detail lives in the docs:
   table when both are registered across an AP/STA transition.
 * **The setup AP could not be configured over the network.** With the catch-all handler
   missing, `/wifi_scan` and the portal redirect were unreachable from the device's own AP.
+* **Enrolling a node in a household panicked the device instead of enrolling it.** The join
+  handler read the request body into a 4096-byte buffer on the HTTP task's stack, which is
+  6144 bytes, so it overflowed, panicked and rebooted - after writing the household record
+  but before completing it. The node came back looking half-provisioned: the household
+  stuck at `PROVISIONING`, the node still `UNCONFIGURED`, and no response ever sent to
+  whoever asked, so nothing explained what had happened. Request bodies are now read from
+  the heap and capped per endpoint, and a body over the cap is refused with `413` instead
+  of being silently truncated into an "invalid JSON" error. Backup restore had the same
+  fault with a 16 KiB buffer, so restoring a backup panicked the device every time.
+* **The household recovery secret was never actually stored.** Its NVS key was
+  `HH_RECOVERY_SECRET` - 18 characters - and NVS keys are limited to 15, so every write of
+  it was rejected and `HouseholdManager::save()` could never succeed once a secret existed.
+  Two consequences, both silent: the household could never reach `ACTIVE`, because the
+  update that flips it went through the same failing call, and the recovery secret that
+  household backups are encrypted with did not exist on the device at all while the UI
+  reported it as stored. The keys are now `HH_REC_SECRET` and `HH_REC_SALT`, guarded by a
+  `static_assert`; the secret and salt are written before the record that refers to them,
+  so a failure can no longer leave a device claiming a secret it does not have; and a
+  record that makes that claim is corrected at load time rather than repeated.
+* **Enrollment reported success for writes that did not reach storage.** Every step of the
+  join handler discarded its result and replied `{"success":true}` regardless, so a
+  failure and a success were indistinguishable from outside. Failures now report the
+  reason (`507`), log the NVS entry counts, and write no enrollment audit record; a state
+  that will not survive a reboot is no longer announced. The boot log additionally warns
+  when NVS is running low, since a full partition fails *every* write - including updates
+  to values that already exist, because NVS appends a new entry per change.
 
 ### Known issues
 

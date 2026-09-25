@@ -197,6 +197,25 @@ bool ConfigManager::begin() {
   ESP_LOGI(TAG,"Count: UsedEntries = (%lu), FreeEntries = (%lu), AvailableEntries = (%lu), AllEntries = (%lu)\n",
        nvs_stats.used_entries, nvs_stats.free_entries, nvs_stats.available_entries, nvs_stats.total_entries);
 
+  // NVS is the tightest resource on this device: one 24 KiB partition holds the config
+  // blobs, the HTTPS certificate and private key, the reader credential store, the node
+  // identity, the household record and the audit ring. Free entries are what every write
+  // needs - including a change to a value that already exists, because NVS appends a new
+  // entry rather than editing in place - so running out is not a gradual degradation, it
+  // is every write failing at once, on a device that still looks healthy.
+  //
+  // Reported at WARN, because the INFO line above is invisible on a device whose log level
+  // has been raised above it, and that is exactly when nobody is looking for this.
+  if (nvs_stats.total_entries && nvs_stats.free_entries * 4 < nvs_stats.total_entries) {
+    ESP_LOGW(TAG,
+             "NVS is running out of space: %lu of %lu entries free (%lu used). Once free "
+             "reaches zero every write fails, including updates to values that already "
+             "exist, which makes the failure look like a setting that will not stick.",
+             static_cast<unsigned long>(nvs_stats.free_entries),
+             static_cast<unsigned long>(nvs_stats.total_entries),
+             static_cast<unsigned long>(nvs_stats.used_entries));
+  }
+
   m_isInitialized = true;
 
   ESP_LOGI(TAG, "Loading configurations from NVS...");

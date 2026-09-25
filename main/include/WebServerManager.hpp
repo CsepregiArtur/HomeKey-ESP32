@@ -229,6 +229,19 @@ private:
    */
   bool haRequireTls(httpd_req_t *req) const;
 
+  /**
+   * @brief Read a request body into a heap buffer, or answer an error and return false.
+   *
+   * Bodies are never read into a local buffer in this file: the HTTPS server's task has
+   * 6144 bytes of stack (see ssl_config.httpd.stack_size), so a local `char buf[4096]` -
+   * or the `[16384]` used for backup restore - overruns it, panics the device and reboots
+   * it. From the outside that looks like the request silently doing nothing at all.
+   *
+   * Reads until the whole body has arrived, because one httpd_req_recv() call is allowed
+   * to return less than that, and a half-read JSON document is reported as "invalid JSON".
+   */
+  static bool readBody(httpd_req_t *req, std::string &out, size_t maxSize);
+
   // ------------------------------------------------------------------------
   // HTTP to HTTPS redirect
   //

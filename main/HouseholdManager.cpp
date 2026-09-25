@@ -10,8 +10,20 @@
 const char *HouseholdManager::TAG = "Household";
 
 static const char *KEY_HH_META = "HH_META";
-static const char *KEY_HH_RECOVERY_SECRET = "HH_RECOVERY_SECRET";
-static const char *KEY_HH_RECOVERY_SALT = "HH_RECOVERY_SALT";
+
+// NVS keys may be at most NVS_KEY_NAME_MAX_SIZE - 1 (15) characters, and the obvious names
+// for these two are longer: the secret was "HH_RECOVERY_SECRET", 18 characters, so
+// nvs_set_blob rejected every write of it and save() could never succeed. The recovery
+// secret is what household backups are encrypted with, so the effect was not a missing
+// field but a device claiming a stored secret it did not have, and backups that could
+// never have been restored. The assertion below is what stops a rename reintroducing it.
+static const char *KEY_HH_RECOVERY_SECRET = "HH_REC_SECRET";
+static const char *KEY_HH_RECOVERY_SALT = "HH_REC_SALT";
+
+static_assert(sizeof("HH_META") - 1 < NVS_KEY_NAME_MAX_SIZE &&
+                  sizeof("HH_REC_SECRET") - 1 < NVS_KEY_NAME_MAX_SIZE &&
+                  sizeof("HH_REC_SALT") - 1 < NVS_KEY_NAME_MAX_SIZE,
+              "An NVS key longer than 15 characters is rejected at write time.");
 
 namespace {
 
@@ -217,7 +229,13 @@ bool HouseholdManager::ensureRecoverySecret() {
     m_info.has_recovery_secret = true;
     m_info.recovery_exported = false;
     recomputeRecoveryMetadata();
-    save();
+    // The secret exists only if this write lands. Reporting it as generated without
+    // storing it is how a device ends up offering a recovery secret it cannot produce.
+    if (!save()) {
+        ESP_LOGE(TAG, "Could not store the generated recovery secret; backups made with "
+                      "it would not be recoverable.");
+        return false;
+    }
     ESP_LOGI(TAG, "Generated household recovery secret (export it once, then store offline).");
     return true;
 }
@@ -298,24 +316,29 @@ bool HouseholdManager::save() {
     blob.hasRecoverySecret = m_info.has_recovery_secret ? 1 : 0;
     blob.recoveryExported = m_info.recovery_exported ? 1 : 0;
 
-    esp_err_t err = nvs_set_blob(m_handle, KEY_HH_META, &blob, sizeof(blob));
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "nvs_set_blob(HH_META) failed: %s", esp_err_to_name(err));
-        return false;
-    }
+    // The secret and the salt are written before the record that refers to them. The record
+    // says whether a recovery secret exists, so writing it first allows a failure to leave
+    // behind a device that claims a secret it does not have - which is exactly what the
+    // over-long keys above produced once they were rejected.
+    esp_err_t err = ESP_OK;
     if (!m_recoverySecret.empty()) {
         err = nvs_set_blob(m_handle, KEY_HH_RECOVERY_SECRET, m_recoverySecret.data(), m_recoverySecret.size());
         if (err != ESP_OK) {
-            ESP_LOGE(TAG, "nvs_set_blob(HH_RECOVERY_SECRET) failed: %s", esp_err_to_name(err));
+            ESP_LOGE(TAG, "nvs_set_blob(%s) failed: %s", KEY_HH_RECOVERY_SECRET, esp_err_to_name(err));
             return false;
         }
     }
     if (!m_salt.empty()) {
         err = nvs_set_blob(m_handle, KEY_HH_RECOVERY_SALT, m_salt.data(), m_salt.size());
         if (err != ESP_OK) {
-            ESP_LOGE(TAG, "nvs_set_blob(HH_RECOVERY_SALT) failed: %s", esp_err_to_name(err));
+            ESP_LOGE(TAG, "nvs_set_blob(%s) failed: %s", KEY_HH_RECOVERY_SALT, esp_err_to_name(err));
             return false;
         }
+    }
+    err = nvs_set_blob(m_handle, KEY_HH_META, &blob, sizeof(blob));
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "nvs_set_blob(HH_META) failed: %s", esp_err_to_name(err));
+        return false;
     }
     err = nvs_commit(m_handle);
     if (err != ESP_OK) {
@@ -366,6 +389,19 @@ bool HouseholdManager::load() {
     if (err == ESP_OK && keySize > 0) {
         m_salt.resize(keySize);
         nvs_get_blob(m_handle, KEY_HH_RECOVERY_SALT, m_salt.data(), &keySize);
+    }
+
+    // Reconcile what the record claims with what was actually read back. A device that
+    // says it holds a recovery secret it cannot produce is worse than one that admits it
+    // holds none, because the user is told their backups are recoverable. Any record left
+    // by the over-long key names above is in exactly that state.
+    if (m_info.has_recovery_secret && (m_recoverySecret.empty() || m_salt.empty())) {
+        ESP_LOGW(TAG, "Household record claims a recovery secret, but none is stored; "
+                      "clearing the claim. A new one is made on the next join or export.");
+        m_info.has_recovery_secret = false;
+        m_info.recovery_exported = false;
+        m_info.recovery_metadata.clear();
+        save();
     }
     return true;
 }

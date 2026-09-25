@@ -135,7 +135,11 @@ Apple Home app. This cannot be safely automated and is documented as a hard limi
 
 ### 2.5 Storage plan (same `SAVED_DATA` namespace, distinct keys)
 - Node: `NODE_META` (blob), `NODE_PRIVKEY` (blob — never exposed).
-- Household: `HH_META` (blob), `HH_RECOVERY_SECRET` (blob), `HH_RECOVERY_SALT` (blob), `HH_RECOVERY_EXPORTED` (u8).
+- Household: `HH_META` (blob - id, name, state, config version, trust key and the
+  recovery flags), `HH_REC_SALT` (blob), `HH_REC_SECRET` (blob). The last two are
+  abbreviated because NVS keys are limited to 15 characters, and the descriptive
+  names that read better (`HH_RECOVERY_SECRET`, 18 characters) were refused by every
+  write. `recovery_exported` is a field of `HH_META`, not a key of its own.
 - Provisioning: `PROV_HASH` (blob), `PROV_EXPIRY` (u64), `PROV_USED` (u8).
 - Audit: `AUDIT_<slot>` chunked blobs (bounded ring).
 - Backup last-run: `BK_LAST_TIME` (u64), `BK_LAST_HASH` (blob).

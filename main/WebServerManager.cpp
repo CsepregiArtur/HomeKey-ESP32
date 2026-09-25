@@ -229,6 +229,35 @@ esp_err_t WebServerManager::sendJsonError(httpd_req_t *req, const std::string &m
   return ESP_OK;
 }
 
+bool WebServerManager::readBody(httpd_req_t *req, std::string &out, size_t maxSize) {
+  if (req->content_len <= 0) {
+    sendJsonError(req, "Empty request body", "400 Bad Request");
+    return false;
+  }
+  if (static_cast<size_t>(req->content_len) > maxSize) {
+    sendJsonError(req,
+                  fmt::format("Request body is {} bytes; the most this endpoint accepts is {}.",
+                              req->content_len, maxSize),
+                  "413 Payload Too Large");
+    return false;
+  }
+
+  out.assign(static_cast<size_t>(req->content_len), '\0');
+  size_t received = 0;
+  while (received < out.size()) {
+    const int chunk = httpd_req_recv(req, out.data() + received, out.size() - received);
+    if (chunk == HTTPD_SOCK_ERR_TIMEOUT) {
+      continue;
+    }
+    if (chunk <= 0) {
+      sendJsonError(req, "Could not read the request body", "400 Bad Request");
+      return false;
+    }
+    received += static_cast<size_t>(chunk);
+  }
+  return true;
+}
+
 std::string ownerConflictMsg(int pin, const std::string &key, const std::string &owner) {
   return std::to_string(pin) + " for \"" + key + "\" already owned by \"" + owner + "\".";
 }
@@ -3715,14 +3744,12 @@ esp_err_t WebServerManager::handleSetIssuerName(httpd_req_t *req) {
   if (!instance->basicAuth(req)) return sendAuthFailure(req);
 
   // A bounded body: this endpoint carries an id and a short name and nothing else.
-  char buf[256];
-  const int received = httpd_req_recv(req, buf, sizeof(buf) - 1);
-  if (received <= 0) {
-    return sendJsonError(req, "Empty request body", "400 Bad Request");
+  std::string body;
+  if (!readBody(req, body, 512)) {
+    return ESP_OK; // readBody has already answered
   }
-  buf[received] = '\0';
 
-  cJSON *root = cJSON_Parse(buf);
+  cJSON *root = cJSON_Parse(body.c_str());
   if (!root) {
     return sendJsonError(req, "Invalid JSON", "400 Bad Request");
   }
@@ -4129,13 +4156,14 @@ esp_err_t WebServerManager::handleRestoreBackup(httpd_req_t *req) {
         return sendJsonError(req, "Restore manager unavailable", "503 Service Unavailable");
     }
 
-    char buf[16384];
-    const int received = httpd_req_recv(req, buf, sizeof(buf) - 1);
-    if (received <= 0) {
-        return sendJsonError(req, "Empty request body", "400 Bad Request");
+    // A backup of the whole configuration is legitimately large, so the cap is generous -
+    // but it is a heap allocation, not a stack one. This was a 16 KiB local array on the
+    // same 6 KiB stack, so restoring a backup panicked the device every single time.
+    std::string body;
+    if (!readBody(req, body, 32 * 1024)) {
+        return ESP_OK; // readBody has already answered
     }
-    buf[received] = '\0';
-    cJSON *root = cJSON_Parse(buf);
+    cJSON *root = cJSON_Parse(body.c_str());
     if (!root) {
         return sendJsonError(req, "Invalid JSON", "400 Bad Request");
     }
@@ -4199,13 +4227,15 @@ esp_err_t WebServerManager::handleJoinHousehold(httpd_req_t *req) {
         return sendJsonError(req, "Managers unavailable", "503 Service Unavailable");
     }
 
-    char buf[4096];
-    const int received = httpd_req_recv(req, buf, sizeof(buf) - 1);
-    if (received <= 0) {
-        return sendJsonError(req, "Empty request body", "400 Bad Request");
+    // Small body - a code, an id, a name and a role - and read from the heap rather than the
+    // stack. This was a 4096-byte local array on a 6144-byte stack, so every join overflowed
+    // it: the device panicked, rebooted, and came back with the household half written at
+    // PROVISIONING and no response ever sent to the caller.
+    std::string body;
+    if (!readBody(req, body, 1024)) {
+        return ESP_OK; // readBody has already answered
     }
-    buf[received] = '\0';
-    cJSON *root = cJSON_Parse(buf);
+    cJSON *root = cJSON_Parse(body.c_str());
     if (!root) {
         return sendJsonError(req, "Invalid JSON", "400 Bad Request");
     }
