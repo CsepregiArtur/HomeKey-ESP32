@@ -871,7 +871,11 @@ void MqttManager::publishNodeStatus() {
 
     if (m_health) {
         const HealthManager::Snapshot snap = m_health->snapshot();
-        publish(base + "/health", m_health->toJson(snap), 0, false);
+        // Retained, like every sibling topic, and QoS 1 because this is the document that
+        // carries the lock's state: a subscriber that arrives between two of these would
+        // otherwise have no lock state at all for up to a full cadence, which is exactly
+        // what a Home Assistant restart looked like.
+        publish(base + "/health", m_health->toJson(snap), 1, true);
         // Compact security state (OK / WARNING / ERROR). ERROR is reserved for
         // when the posture cannot be computed; the firmware currently emits OK or
         // WARNING only. No numeric score.

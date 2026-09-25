@@ -1,4 +1,5 @@
 #include "HealthManager.hpp"
+#include "JsonGuard.hpp"
 #include "LockManager.hpp"
 #include "NfcManager.hpp"
 #include "MqttManager.hpp"
@@ -84,13 +85,46 @@ HealthManager::Snapshot HealthManager::snapshot() const {
 }
 
 std::string HealthManager::toJson(const Snapshot &snap) const {
-    return fmt::format(
-        "{{\"network\":\"{}\",\"mqtt\":\"{}\",\"mqtt_error\":{},\"nfc\":\"{}\","
-        "\"lock_current\":{},\"lock_target\":{},\"backup\":\"{}\",\"certificate\":\"{}\","
-        "\"firmware_version\":\"{}\",\"uptime\":{},\"free_heap\":{},\"reset_reason\":\"{}\","
-        "\"security\":{{\"all_ok\":{},\"warnings\":\"{}\"}}}}",
-        snap.network_ok ? "OK" : "UNKNOWN", snap.mqtt_ok ? "OK" : "ERROR", snap.mqtt_error,
-        snap.nfc_ok ? "OK" : "ERROR", snap.lock_current, snap.lock_target, snap.backup_status,
-        snap.certificate_status, snap.firmware_version, snap.uptime_s, snap.free_heap,
-        snap.reset_reason, snap.security_all_ok ? "true" : "false", snap.security_warnings);
+    // Built with cJSON rather than fmt::format, because this document interpolates free text
+    // into a JSON string and hand-formatting cannot escape it. security_warnings is the case
+    // that bit: findings are joined with real newlines, a raw newline is not legal inside a
+    // JSON string, and so the published document was invalid JSON on any device with more
+    // than one thing to warn about. This is the only place the lock's state is reported, so
+    // a strict reader - the Home Assistant integration - discarded every payload and the
+    // lock entity never received a state from it, while everything else about the node
+    // looked healthy. cJSON escapes what needs escaping, so the next free-text field added
+    // here is safe by construction.
+    JsonGuard root(cJSON_CreateObject());
+    if (!root.get()) {
+        return "{}";
+    }
+
+    cJSON_AddStringToObject(root.get(), "network", snap.network_ok ? "OK" : "UNKNOWN");
+    cJSON_AddStringToObject(root.get(), "mqtt", snap.mqtt_ok ? "OK" : "ERROR");
+    cJSON_AddNumberToObject(root.get(), "mqtt_error", snap.mqtt_error);
+    cJSON_AddStringToObject(root.get(), "nfc", snap.nfc_ok ? "OK" : "ERROR");
+    cJSON_AddNumberToObject(root.get(), "lock_current", snap.lock_current);
+    cJSON_AddNumberToObject(root.get(), "lock_target", snap.lock_target);
+    cJSON_AddStringToObject(root.get(), "backup", snap.backup_status.c_str());
+    cJSON_AddStringToObject(root.get(), "certificate", snap.certificate_status.c_str());
+    cJSON_AddStringToObject(root.get(), "firmware_version", snap.firmware_version.c_str());
+    cJSON_AddNumberToObject(root.get(), "uptime", snap.uptime_s);
+    cJSON_AddNumberToObject(root.get(), "free_heap", snap.free_heap);
+    cJSON_AddStringToObject(root.get(), "reset_reason", snap.reset_reason.c_str());
+
+    JsonGuard security(cJSON_CreateObject());
+    if (!security.get()) {
+        return "{}";
+    }
+    cJSON_AddBoolToObject(security.get(), "all_ok", snap.security_all_ok);
+    cJSON_AddStringToObject(security.get(), "warnings", snap.security_warnings.c_str());
+    cJSON_AddItemToObject(root.get(), "security", security.release());
+
+    char *printed = cJSON_PrintUnformatted(root.get());
+    if (!printed) {
+        return "{}";
+    }
+    const std::string json(printed);
+    cJSON_free(printed);
+    return json;
 }
