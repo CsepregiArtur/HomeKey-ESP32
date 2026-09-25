@@ -99,6 +99,7 @@ ConfigManager::ConfigManager() : m_isInitialized(false) {
       {"controlPin", &m_miscConfig.controlPin},
       {"hsStatusPin", &m_miscConfig.hsStatusPin},
       {"webAuthEnabled", &m_miscConfig.webAuthEnabled},
+      {"setupCompleted", &m_miscConfig.setupCompleted},
       {"webUsername", &m_miscConfig.webUsername},
       {"webPassword", &m_miscConfig.webPassword},
       {"webHttpsEnabled", &m_miscConfig.webHttpsEnabled},
@@ -212,8 +213,8 @@ bool ConfigManager::hasStoredConfig() {
     return false;
   }
   // "MISCDATA" carries both the misc and the actions configuration, and it is the
-  // blob that persists the generated credentials, so its presence is what
-  // distinguishes an already-configured device from a factory-fresh one.
+  // blob that records whether first-run setup has been completed, so its presence is
+  // what distinguishes an already-configured device from a factory-fresh one.
   size_t len = 0;
   const esp_err_t err = nvs_get_blob(m_nvsHandle, "MISCDATA", NULL, &len);
   if (err == ESP_ERR_NVS_NOT_FOUND) {

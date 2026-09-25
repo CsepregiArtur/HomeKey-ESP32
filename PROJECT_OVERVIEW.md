@@ -54,7 +54,7 @@ The tagline: *"Apple HomeKey functionality for the rest of us"* — no proprieta
 | **OTA** | Firmware and LittleFS (web UI) updates over the network |
 | **Hardware actions** | Relays/GPIO, NeoPixels, feedback LEDs, alternate action button |
 | **Ethernet** | Wired networking as an alternative to Wi-Fi |
-| **Security** | Per-device generated credentials, Web UI auth, HTTPS/mTLS, OTA verification, **optional flash encryption + Secure Boot V1 + NVS encryption** (disabled by default), HMAC-authenticated MQTT commands, encrypted signed backups |
+| **Security** | First-run credential setup, Web UI auth, HTTPS/mTLS, OTA verification, **optional flash encryption + Secure Boot V1 + NVS encryption** (disabled by default), HMAC-authenticated MQTT commands, encrypted signed backups |
 
 ---
 
@@ -100,7 +100,8 @@ The design is a **pub/sub event bus** (`app_events.hpp` + `app_event_loop`) — 
 
 ### 4.1 Application entry — `main.cpp`
 - Boot sequence: GPIO/UART init, NVS init, logging init, default event loop, **reset-reason reporting** (distinguishes panic/WDT/brownout from a clean boot), `ConfigManager::begin()`, `securityInit()`, then constructs all managers.
-- **First-boot security**: a factory-fresh device generates random per-device **Setup Code, AP password, OTA password and Web UI password**, prints them **once** to the serial log at 115200 baud, enables Web UI auth, and hands the Setup Code to HomeSpan. Already-configured devices are never rewritten.
+- **First-run security**: a factory-fresh device keeps the shipped placeholder credentials, leaves Web UI authentication **off** and shows a blocking setup screen in the Web UI, where the user chooses the **Setup Code, setup AP password, OTA password and Web UI password**. Submitting it sets `setupCompleted` and turns authentication on. Already-configured devices are migrated to `setupCompleted` automatically and never rewritten.
+- The setup AP advertises as **WPA2-PSK with CCMP** rather than WPA2/WPA3 mixed mode, because the mixed-mode WPA3 cipher suite caused association failures ("connection timeout") on a range of clients.
 - Runs the AP/captive-portal workflow when there is no working network, and the main loop (`homeSpan.poll()` + 50 ms yield).
 
 ### 4.2 `NfcManager` — NFC orchestration
@@ -228,11 +229,11 @@ Example auth payloads:
 ## 9. Security model (documented in `docs/content/security.md`)
 
 **Default (no config):**
-- Per-device generated first-boot credentials (Setup Code, AP password, OTA password, Web UI password), printed once to the serial log.
-- Web UI authentication on for new devices; secrets never returned to the browser (masked as `********`).
+- First-run setup screen asks the user to choose the Setup Code, setup AP password, OTA password and Web UI password. Nothing is generated or logged.
+- Web UI authentication stays off until that screen is saved; secrets are never returned to the browser (masked as `********`).
 - HomeSpan `espota` disabled until a custom OTA password is set.
-- Both setup APs reject the published passwords (`HomeKey$123$`, `homespan`).
-- Temporary WPA2/WPA3 AP (max 2 clients, idle restart after 10 min).
+- The setup AP password is the shipped `HomeKey$123$` until the user changes it during setup; HomeSpan's own AP is aligned with it so the published `homespan` value never opens either one.
+- Temporary WPA2-PSK (CCMP) AP (max 2 clients, idle restart after 10 min).
 - POST-only + `Host`-validated state changes; login throttling (2 s after 5 failures).
 - No Bluetooth stack compiled in (Wi-Fi/SRP HomeKit pairing only).
 

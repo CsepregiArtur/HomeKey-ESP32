@@ -3,6 +3,40 @@
 Notable changes per release. User-facing detail lives in the docs:
 [Security](docs/content/security.md) and [Updates / breaking changes](docs/content/updates.md).
 
+## Unreleased
+
+### Changed
+
+* **First-run setup replaces automatic credential generation.** A factory-fresh device keeps
+  the shipped placeholders, leaves Web UI authentication off and shows a blocking setup
+  screen where you choose the Web UI password, HomeKit Setup Code, OTA password and setup AP
+  password. Nothing is generated, printed or logged any more. Devices configured before this
+  change are migrated automatically and are not pushed through setup again.
+  See [Security](docs/content/security.md) and
+  [PATH2 rollout](docs/content/PATH2_SECURITY_ROLLOUT.md).
+* **The setup AP uses WPA2-PSK (CCMP)** instead of WPA2/WPA3 mixed mode with AES-CMAC. The
+  mixed-mode cipher suite caused association failures ("connection timeout") on a range of
+  clients, so the provisioning AP could not be joined at all. WPA3 hardening belongs on the
+  station side, not on a short-lived setup AP.
+
+### Fixed
+
+* **The Web UI returned `404 Nothing matches the given URI` for most URLs.** The HTTP server
+  was configured with `max_uri_handlers = 22`, but the main route table registers 28
+  handlers. The last six silently failed to register - including the catch-all `{"/*"}` -
+  so any unmatched path 404'd. Raised the limit to 48, which also covers the captive-portal
+  table when both are registered across an AP/STA transition.
+* **The setup AP could not be configured over the network.** With the catch-all handler
+  missing, `/wifi_scan` and the portal redirect were unreachable from the device's own AP.
+
+### Known issues
+
+* Phones do not auto-open the captive portal. Probe requests (for example
+  `netcts.cdn-apple.com`) carry a foreign `Host` header and are rejected by
+  `hostHeaderAllowed()` before the portal redirect runs, so the address has to be typed.
+* The PN532 reader repeatedly fails to initialise (`Error establishing PN532 connection`).
+  Under investigation; see the NFC notes in the docs.
+
 ## 0.10.0 - 2026-09-22
 
 Adds the **Household** multi-node architecture and **support for on-device flash
@@ -124,9 +158,13 @@ Full list with fixes: [Breaking changes](docs/content/updates.md#4-breaking-chan
 * **Update the firmware before the filesystem image.** Older firmware only looks for `.gz`
   assets, so flashing the new filesystem image on its own leaves the Web UI unable to load
   until the firmware is flashed over USB.
-* **New devices ask for a Web UI login.** The credentials are printed once to the
-  **first-boot serial log** (115200 baud). If they are lost, the setup portal does not
-  require a login and erasing NVS generates a new set - see
+* **New devices ask you to choose their credentials.** A factory-fresh device no longer
+  generates credentials and prints them to the serial log. It comes up with Web UI
+  authentication **off** and shows a blocking first-run setup screen where you choose the
+  Web UI username and password, HomeKit Setup Code, OTA password and setup AP password.
+  Until you save it the Web UI has **no login**, so keep a fresh device on a trusted
+  network. If a credential is lost, the setup portal does not require a login and erasing
+  NVS returns the device to the first-run screen - see
   [Recovering from a lost credential](docs/content/security.md#recovering-from-a-lost-credential).
 * **`espota` needs a custom OTA password** (security default change). Impact: anyone who
   updates over the network with `espota` has to set a password once; the Web UI firmware

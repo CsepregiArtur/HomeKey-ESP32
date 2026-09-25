@@ -129,16 +129,17 @@ After flashing, your HomeKey-ESP32 is ready for initial configuration.
 
 1. **Connect to Wi-Fi Access Point:** On first boot (or when no Wi-Fi credentials are saved), the device hosts an access point:
     * **SSID:** `HK_{XXXXXX}`
-    * **Password:** printed on the serial console at first boot. A brand-new device generates a random password instead of the `HomeKey$123$` value that used to be compiled in; a device that was configured before this change keeps the password already stored in it (the default is `HomeKey$123$`, and it can be changed from the configuration page). See [Security]({{< ref "security" >}}) for the full list of credentials generated on first boot.
-2. **Access the Captive Portal:** If the operating system doesn't automatically open the captive portal, navigate to `http://192.168.4.1` in your web browser.
+    * **Password:** `HomeKey$123$` until you set your own on the first-run setup screen. See [Security]({{< ref "security" >}}) for the full list of credentials first-run setup asks for.
+2. **Access the Captive Portal:** The portal is not auto-detected on phones, so open `http://192.168.4.1` manually in your web browser.
 3. **Configure Options:**
     * **Wi-Fi & HomeKit:** Scan and select Wi-Fi network, enter password, set 8-digit HomeKit pairing code, select HomeKey pass color (Tan, Gold, Silver, Black), configure AP Access Point Password (`accessPointPassword`), and optionally enable Web UI authentication with your own username/password.
     * **Hardware Tab:** Select NFC reader type (PN532, PN7161 or ST25R3916) and presets, assign custom NFC GPIO pins (including IRQ and VEN for PN7161), configure Ethernet settings, and see strapping pin restrictions on conflicting assignments. Override strapping pin restrictions if required by custom hardware (`overrideStrappingRestriction`).
-4. **Save & Connect:** Upon clicking "Save", the captive portal submits configuration diffs and connects to your Wi-Fi network. On successful connection, the interface displays the assigned network IP address - and the Web UI credentials to use afterwards - before closing.
+4. **Save & Connect:** Upon clicking "Save", the captive portal submits configuration diffs and connects to your Wi-Fi network. On successful connection, the interface displays the assigned network IP address before closing.
+5. **Finish first-run setup:** Open the device's Web UI on your network. A blocking setup screen asks for your Web UI username and password, HomeKit Setup Code, OTA password and setup AP password. Until you save it the Web UI has **no login** - see [Security]({{< ref "security" >}}).
 
 ## 5. HomeKit Pairing
 
-On a brand-new device the Setup Code is generated randomly on first boot and printed on the serial console (in the form `123-45-678`); the captive portal shows the current code as well. Enter that code in the Home app. Devices configured before this change keep their existing code, which is `466-37-726` unless it was changed. Once connected to your Wi-Fi network, open the Apple Home app, tap **Add Accessory**, and enter or scan the setup code.
+On a brand-new device the Setup Code is the shipped `466-37-726` until you set your own on the first-run setup screen. Enter it in the Home app. Devices configured before this change keep their existing code. Once connected to your Wi-Fi network, open the Apple Home app, tap **Add Accessory**, and enter or scan the setup code.
 
 ## 6. Troubleshooting Common Setup Issues
 

@@ -175,13 +175,14 @@ The following chips are supported for Ethernet:
    **Prefer a GUI?** Use the [browser-based flasher](https://espressif.github.io/esptool-js/) - no command line needed!
 
 4. **Initial Setup**
-   - Connect to the device's WiFi AP (`HK_XXXXXX`) using the **setup AP password from the first-boot serial log** (115200 baud); devices configured before this change used `HomeKey$123$`
-   - Access the web interface at `http://192.168.4.1`
+   - Connect to the device's WiFi AP (`HK_XXXXXX`). The password is `HomeKey$123$` until you set your own on the setup screen.
+   - Access the web interface at `http://192.168.4.1` - type the address, phones do not auto-open the portal
    - Configure your WiFi credentials, HomeKit setup code and Web UI login
-   - Pair with Apple Home using the **Setup Code from the first-boot serial log**; devices configured before this change used `466-37-726`
+   - Open the device's Web UI on your network and finish the **first-run setup screen**: Web UI username + password, HomeKit Setup Code, OTA password and setup AP password. Until you save it the Web UI has **no login**, so only do this on a trusted network.
+   - Pair with Apple Home using the Setup Code you chose (the shipped `466-37-726` applies until you set your own)
 
 > [!NOTE]
-> A factory-fresh device generates unique credentials on first boot and prints them once to the serial console; the setup portal shows the Web UI login again after it saves. See [Security](docs/content/security.md) - including what to do if you lose them.
+> A factory-fresh device asks you to choose its credentials rather than generating and printing them. See [Security](docs/content/security.md) for the full flow, and for what to do if a credential is lost.
 
 5. **Start Using HomeKey!**
    - Hold your iPhone or Apple Watch near the NFC reader
@@ -191,7 +192,7 @@ The following chips are supported for Ethernet:
 
 Follow the update in the documentation at: https://rednblkx.github.io/HomeKey-ESP32/updates/
 
-Review [CHANGELOG.md](CHANGELOG.md) before updating: some releases change security defaults or the update procedure itself (for example, the firmware has to be updated before the filesystem image). The [Security](docs/content/security.md) page explains the credentials a new device generates on first boot and how to recover them.
+Review [CHANGELOG.md](CHANGELOG.md) before updating: some releases change security defaults or the update procedure itself (for example, the firmware has to be updated before the filesystem image). The [Security](docs/content/security.md) page explains the first-run setup flow and how to recover a lost credential.
 
 ## System Architecture
 

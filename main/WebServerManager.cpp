@@ -274,7 +274,16 @@ void WebServerManager::begin() {
   bool isHttpsActive = !isApMode && shouldEnableHttps();
 
   httpd_ssl_config_t ssl_config = HTTPD_SSL_CONFIG_DEFAULT();
-  ssl_config.httpd.max_uri_handlers = 22;
+  // Must be at least as large as the largest route table below, otherwise the tail of
+  // the table is silently dropped: httpd_register_uri_handler logs "no slots left" and
+  // the handler never exists. That used to leave the catch-all `{"/*"}` unregistered,
+  // so every unmatched URL returned "Nothing matches the given URI" (404) - including
+  // the Web UI root and the captive-portal redirect.
+  //
+  // setupRoutes() registers 28 handlers; setupCaptivePortalRoutes() registers 10. Both
+  // tables can end up on the same server across an AP/STA transition, so size for the
+  // sum with headroom rather than for either table alone.
+  ssl_config.httpd.max_uri_handlers = 48;
   ssl_config.httpd.max_open_sockets = 4;
   ssl_config.httpd.stack_size = 6144;
   ssl_config.httpd.uri_match_fn = httpd_uri_match_wildcard;
@@ -1607,8 +1616,9 @@ esp_err_t WebServerManager::handleGetCaptivePortalConfig(httpd_req_t *req) {
   JsonBuilder config = JsonBuilder::object();
   config.addString("setupCode", miscConfig.setupCode.c_str());
   // The portal lets the user set up Web UI authentication; the stored password is
-  // deliberately not part of this payload (it already exists on first boot and is
-  // reported once when the form is saved).
+  // deliberately not part of this payload. On a device that has not been through
+  // first-run setup there is no usable password yet - the setup screen is where the
+  // user chooses one.
   config.addBool("webAuthEnabled", miscConfig.webAuthEnabled);
   config.addString("webUsername", miscConfig.webUsername.c_str());
   config.addNumber("hk_key_color", miscConfig.hk_key_color);
@@ -1913,9 +1923,10 @@ esp_err_t WebServerManager::handleSaveCaptivePortalConfig(httpd_req_t *req) {
   cJSON_DeleteItemFromObject(obj.get(), "wifiSsid");
   cJSON_DeleteItemFromObject(obj.get(), "wifiPassword");
 
-  // Web UI credentials are optional in the setup portal: first boot already
-  // generated a password, so an empty field means "keep what is stored" and the
-  // key is dropped before the body reaches ConfigManager.
+  // Web UI credentials are optional in the setup portal: an empty field means "keep
+  // what is stored" and the key is dropped before the body reaches ConfigManager. A
+  // device that has not been through first-run setup has no usable password yet, and
+  // the check below stops authentication being switched on without one.
   for (const char *key : {"webUsername", "webPassword"}) {
     cJSON *item = cJSON_GetObjectItem(obj.get(), key);
     if (item && cJSON_IsString(item) && item->valuestring[0] == '\0') {

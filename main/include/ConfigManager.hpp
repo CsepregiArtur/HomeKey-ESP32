@@ -42,9 +42,9 @@ public:
     /**
      * @brief Whether a configuration blob has ever been persisted to NVS.
      *
-     * Used to tell a factory-fresh device (which gets per-device generated
-     * credentials on first boot, see securityInit() in main.cpp) from one that is
-     * already deployed and whose stored configuration must not be rewritten.
+     * Used to tell a factory-fresh device, which still has to go through the first-run
+     * credential setup (see securityInit() in main.cpp), from one that is already
+     * deployed and whose stored configuration must not be rewritten.
      * Clearing the miscellaneous configuration makes this return false again.
      */
     bool hasStoredConfig();

@@ -5,12 +5,12 @@ weight: 7
 
 ## Locked out of the Web UI
 
-The Web UI password is required as soon as `webAuthEnabled` is on (the default for devices that were set up from a version with generated credentials). Because the setup portal does not require that login, you can always get back in:
+The Web UI password is required once `webAuthEnabled` is on, which first-run setup switches on. Because the setup portal does not require that login, you can always get back in:
 
 1. Reset the Wi-Fi credentials (`Web UI → Misc` if another browser session is still authenticated, otherwise over serial) so the device falls back to its setup access point.
-2. Join the AP with the password printed at first boot, open `http://192.168.4.1`, and set a new Web UI password on the setup page.
+2. Join the AP, open `http://192.168.4.1` and set a new Web UI password on the setup page.
 
-The password is also printed on the serial console at first boot, and reported on the setup page when the Wi-Fi configuration is saved. If none of that is available, erase NVS over USB (`pio run -t erase` or `esptool.py erase_flash`) - the device then generates fresh credentials and prints them - and re-pair it.
+If you never changed the setup AP password from the shipped value, it is `HomeKey$123$`. If you do not know it, erase NVS over USB (`pio run -t erase` or `esptool.py erase_flash`) - the device returns to a factory-fresh state and shows the first-run setup screen again - then re-pair it. Erasing NVS also removes Wi-Fi credentials, the HomeKit pairing and every HomeKey enrolment.
 
 ## HomeSpan `espota` uploads are rejected or time out
 

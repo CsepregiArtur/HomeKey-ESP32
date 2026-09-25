@@ -49,12 +49,20 @@
 
 // Miscellaneous
 //
-// The secrets below are compile-time defaults only. On a device that has never
-// stored a configuration (first boot) the firmware replaces the Setup Code and
-// the OTA password with randomly generated per-device values - see securityInit()
-// in main.cpp. The shipped OTA password is treated as "not configured": while it
-// is unchanged the HomeSpan OTA service stays disabled, because it is a firmware
-// upload endpoint that anybody on the network could otherwise use.
+// The secrets below are compile-time defaults only. A device that has never stored a
+// configuration comes up with these values and with Web UI authentication off, then
+// shows a blocking first-run setup screen where the user chooses their own Web UI
+// password, HomeKit Setup Code, OTA password and setup AP password - see securityInit()
+// in main.cpp.
+//
+// Nothing is generated automatically any more. An earlier version generated random
+// secrets and printed them once to the serial log; that print happens during the hard
+// reset performed by `idf.py flash`, before any monitor is attached, so it was easy to
+// miss - and once missed there was no way to recover the setup AP password.
+//
+// The shipped OTA password is treated as "not configured": while it is unchanged the
+// HomeSpan OTA service stays disabled, because it is a firmware upload endpoint that
+// anybody on the network could otherwise use.
 #define HOMEKEY_COLOR TAN
 #define SETUP_CODE "46637726"  // HomeKit Setup Code (only for reference, has to be changed during WiFi Configuration or from WebUI)
 #define OTA_PWD "homespan-ota" // Custom password for the HomeSpan OTA service; this shipped value means "not configured"
@@ -75,7 +83,7 @@
 #define BTR_PROX_BAT_ENABLED false // Enable or disable battery monitoring
 #define BTR_PROX_BAT_LOW_THRESHOLD 10 // Battery low status threshold percentage
 
-#define AP_PASSWORD "HomeKey$123$" // Setup AP password; replaced by a random value on first boot
+#define AP_PASSWORD "HomeKey$123$" // Setup AP password; the first-run setup screen replaces it
 #define AP_IDLE_CYCLE_MIN 10 // Restart the setup AP after this many minutes with no connected client (0 = never)
 
 // Ethernet Settings
@@ -138,10 +146,10 @@
 #define HK_DUMB_SWITCH_MODE true // Bypass lock state external validation
 
 // WebUI
-// WEB_AUTH_ENABLED is the default for a device with no stored configuration:
-// first boot switches it on and generates a random password, so "admin/password"
-// never protects a live device. Existing devices keep whatever they have stored.
+// Web UI authentication stays OFF until the user completes the first-run setup screen,
+// and that screen is what asks for the password. A fresh device therefore serves an
+// unauthenticated config UI: keep it on a trusted network until setup is finished.
 #define WEB_AUTH_ENABLED false
 #define WEB_AUTH_USERNAME "admin"
-#define WEB_AUTH_PASSWORD "password" // Shipped placeholder; replaced by a random value on first boot
+#define WEB_AUTH_PASSWORD "password" // Shipped placeholder; the first-run setup screen replaces it
 #define NFC_ACTIVE_PRESET 255 // NFC preset index (255 for custom pins)

@@ -206,6 +206,14 @@ namespace espConfig
     uint8_t controlPin = HS_PIN;
     uint8_t hsStatusPin = HS_STATUS_LED;
     bool webAuthEnabled = WEB_AUTH_ENABLED;
+    // False until the user has completed the first-run credential setup in the Web UI.
+    // A freshly flashed device keeps webAuthEnabled=false and this false, so the UI is
+    // reachable (on the local network only) long enough to present a blocking onboarding
+    // screen. That screen is where every secret gets chosen deliberately: Web UI
+    // password, HomeKit setup code, OTA password and setup AP password. This avoids both
+    // shipping known placeholder credentials and randomising secrets the user never gets
+    // a chance to read. See securityInit() in main.cpp and docs/content/security.md.
+    bool setupCompleted = false;
     std::string webUsername = WEB_AUTH_USERNAME;
     std::string webPassword = WEB_AUTH_PASSWORD;
     bool webHttpsEnabled = false;

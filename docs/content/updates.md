@@ -188,24 +188,17 @@ The web UI assets are brotli-compressed from this version on, because they no lo
 * **Filesystem image only, on older firmware**: the web UI will not load, because older firmware only looks for `.gz` assets. Recovery needs USB.
 * **Firmware only, on an older filesystem image**: works; gzip assets are still served.
 
-### 4.2. New devices ask for a Web UI login
+### 4.2. New devices ask you to choose their credentials
 
-**What changed:** a device that has never been configured generates its credentials on first boot and turns Web UI authentication on.
+**What changed:** a device that has never been configured no longer generates credentials and prints them to the serial log. Instead it comes up with Web UI authentication **off** and shows a blocking **first-run setup** screen, where you choose your own Web UI username and password, HomeKit Setup Code, OTA password and setup AP password.
 
-**Where to find them:** the **first-boot serial log** at 115200 baud (`pio device monitor`, or any serial terminal). It is printed once:
+**Why:** the old values were printed **once**, during the hard reset that `idf.py flash` performs - before a monitor can attach - so they were easy to miss, and a missed setup AP password could only be recovered by dumping flash. Choosing the values removes that trap and means nothing has to be logged.
 
-```
-HomeKit Setup Code : 123-45-678
-Setup AP password  : <16 random characters>
-Web UI login       : admin / <16 random characters>
-OTA password       : <20 random characters>
-```
+**What to do:** after the device joins your network, open its Web UI and complete the setup screen. Until you save it the Web UI has **no login**, so only do this on a trusted network.
 
-The setup portal shows the Web UI login again on its success screen after saving.
+**If a credential is lost:** see [Recovering from a lost credential]({{< ref "security" >}}) - the setup portal does not require a login, and erasing NVS returns the device to the first-run screen. Devices that are already configured are unaffected and keep their stored values.
 
-**If it is lost:** [Recovering from a lost credential]({{< ref "security" >}}) - the setup portal does not require a login, and erasing NVS generates a new set. Devices that are already configured are unaffected and keep their stored values, including the `HomeKey$123$` setup AP password.
-
-While a new device has no network it may show two access points - its own `HK_XXXXXX` captive portal and HomeSpan's `HomeSpan-Setup`. Both now use the generated AP password, so the shipped `HomeKey$123$` and `homespan` values do not work on a device set up from this version on.
+While a new device has no network it may show two access points - its own `HK_XXXXXX` captive portal and HomeSpan's `HomeSpan-Setup`. Both use the setup AP password, which is `HomeKey$123$` until you set your own on the setup screen.
 
 ### 4.3. `espota` is off until an OTA password is set (security default change)
 

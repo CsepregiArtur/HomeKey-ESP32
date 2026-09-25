@@ -141,8 +141,9 @@ void HomeKitLock::begin() {
     // HomeSpan's own setup access point defaults to the published password
     // "homespan", which would let anyone in radio range join it during setup and
     // change the Wi-Fi credentials or the Setup Code. Align it with the device's
-    // setup AP password (random on first boot) so neither AP can be joined with a
-    // value that is printed in the source tree.
+    // setup AP password so neither AP can be joined with a value that is printed in
+    // the source tree. On a device that has not been through first-run setup that
+    // value is still the shipped default; the setup screen is what changes it.
     homeSpan.setApPassword(miscConfig.accessPointPassword.c_str());
     // HomeSpan's OTA service is an over-the-network firmware upload endpoint whose
     // only protection is this password. The value shipped in defaults.h is public,

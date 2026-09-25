@@ -25,34 +25,36 @@ HomeKey-ESP32 controls a door lock, so it is worth being explicit about what it 
 | Access to your MQTT broker | **Potentially, yes** | Anyone who can publish to the lock's command topics can unlock the door unless the broker enforces authentication and per-device ACLs. See [MQTT](#mqtt-is-an-unlock-path-treat-it-like-one). |
 | A browser on the same network (malicious web page) | **No** | Requests are rejected unless the `Host` header names the device (DNS rebinding / CSRF protection), and all state-changing endpoints are POST-only. |
 | Internet access to the device (port forwarding) | **No, because you should not do it** | Do not expose the Web UI, MQTT broker or device to the internet. If you need remote access, use a VPN. |
-| Radio range only (no credentials) | **No** | The setup AP uses WPA2/WPA3 and a per-device password. NFC/HomeKey requires a provisioned key in the Secure Enclave of an authorised device. |
+| Radio range only (no credentials) | **No** | The setup AP uses WPA2-PSK (CCMP) and the setup AP password. NFC/HomeKey requires a provisioned key in the Secure Enclave of an authorised device. |
 
 ## What this firmware does by default
 
 These protections are active without any configuration:
 
-* **Per-device generated credentials on first boot.** The values compiled into `main/include/defaults.h` (Setup Code, setup AP password, OTA password, Web UI password) are published in this repository, so a factory-fresh device replaces them with random ones. They are printed **once, on first boot, to the serial log at 115200 baud** (`pio device monitor`, or any serial terminal) - that log is the only place they appear:
+* **First-run setup in the Web UI.** The values compiled into `main/include/defaults.h` (Setup Code, setup AP password, OTA password, Web UI password) are published in this repository, so a factory-fresh device does **not** rely on them. It comes up with Web UI authentication **off** and presents a blocking **first-run setup** screen the first time you open the Web UI, where you choose your own:
 
-  ```
-  HomeKit Setup Code : 123-45-678
-  Setup AP password  : <16 random characters>
-  Web UI login       : admin / <16 random characters>
-  OTA password       : <20 random characters>
-  ```
+  | Credential | Notes |
+  | --- | --- |
+  | Web UI username + password | Required to reach the configuration UI afterwards (8 characters minimum) |
+  | HomeKit Setup Code | 8 digits, no leading zero, no trivial patterns; handed to HomeSpan immediately |
+  | OTA password | Turns the HomeSpan OTA endpoint on |
+  | Setup AP password | Used by the `HK_XXXXXX` setup network |
 
-  (shown without the `W (nnnn) Security:` log prefix). Open the serial console before powering a new device on, or read the Web UI login again from the setup portal after it saves. The values are stored in NVS and never regenerated afterwards, so nothing changes for a device that is already set up; clearing the configuration (`Web UI → Misc → Clear`, or erasing NVS) makes the next boot generate a fresh set. If they are lost: [Recovering from a lost credential](#recovering-from-a-lost-credential).
+  Until that screen is submitted the Web UI has **no login**, so keep a fresh device on a trusted network. Saving it sets `setupCompleted`, turns `webAuthEnabled` on and reloads the page, which then asks for the credentials you just chose.
 
-* **Web UI authentication is on for new devices.** `webAuthEnabled` defaults to *on* with a generated password. Devices that were configured before this change keep whatever they have stored - check `Misc → Security` in the Web UI and turn it on if it is off.
+  **Why it works this way.** Earlier versions generated random secrets and printed them **once** to the serial log. That meant the only copy arrived during the hard reset that `idf.py flash` performs - before a monitor can attach - so it was easily missed, and a missed setup AP password could only be recovered by dumping flash. Asking the user to choose the values removes that trap, and means nothing has to be transmitted or logged.
+
+* **Web UI authentication is off until you finish first-run setup.** `webAuthEnabled` starts as `false` and is switched on by the setup screen. A device configured before this change keeps whatever it has stored - check `Misc → Security` in the Web UI and turn it on if it is off.
 
 * **Secrets are never sent to the browser.** Configuration reads return `********` for every `*Password`/`*Passwd` field, and the write path refuses to store that placeholder, so a stale form cannot overwrite a real password with the mask.
 
 * **The HomeSpan OTA service stays off until you set an OTA password.** Its only protection is that password, and the shipped value (`homespan-ota`) is public, so the service is skipped while the password is empty or unchanged. The fix is one line of configuration: set any password under `Web UI → Misc → HomeSpan → OTA Password` and save - the device reboots and `espota` accepts that password. The Web UI OTA uploader (`/ota/*`) is unaffected.
 
-* **Neither setup access point uses a published password.** Two APs can appear while a device has no network: the project's own `HK_XXXXXX` captive portal and HomeSpan's `HomeSpan-Setup`. The project AP uses the per-device password generated on first boot, and HomeSpan's is aligned with it at every boot (`homeSpan.setApPassword()`), so the values printed in this repository (`HomeKey$123$`, `homespan`) do not open either one on a device set up from this version on.
+* **The setup access point password is the documented default until you change it.** Two APs can appear while a device has no network: the project's own `HK_XXXXXX` captive portal and HomeSpan's `HomeSpan-Setup`. Both use the setup AP password so they cannot be opened with two different published values. On a device that has not been through first-run setup that value is `HomeKey$123$`, so **set your own on the setup screen** - the AP only exists before the device is provisioned, but it is still a way in while it is up.
 
-* **The setup AP is temporary by nature.** It is only started when the device has no working network connection, it accepts at most two clients, it uses WPA2/WPA3 with a per-device password, and it is restarted after 10 minutes with nobody connected (`AP_IDLE_CYCLE_MIN` in `defaults.h`).
+* **The setup AP is temporary by nature.** It is only started when the device has no working network connection, it accepts at most two clients, it uses WPA2-PSK with CCMP, and it is restarted after 10 minutes with nobody connected (`AP_IDLE_CYCLE_MIN` in `defaults.h`).
 
-* **The setup portal works without a Web UI login.** The portal is reached before the device has any network, and it is already gated by the AP password. The Web UI password is reported on the portal's success screen (and the serial log) so you can log in afterwards. Use that to recover a lost password: [Locked out of the Web UI](#locked-out-of-the-web-ui).
+* **The setup portal works without a Web UI login.** The portal is reached before the device has any network, and it is already gated by the setup AP password. You can set the Web UI credentials there (or on the first-run setup screen), which is also how you recover from a lost password: [Locked out of the Web UI](#locked-out-of-the-web-ui).
 
 * **State changes are POST-only and `Host`-validated.** A malicious page you visit cannot reset the pairing, force setup mode or read responses via DNS rebinding.
 
@@ -267,15 +269,22 @@ Because the flash is now encrypted, an attacker can no longer simply read the re
 The setup portal does not require the Web UI login, so:
 
 1. `Web UI → Misc → Reset Wi-Fi credentials` (or erase NVS over serial) to make the device fall back to its setup AP.
-2. Join the AP with the password printed at first boot (or the last one you set). If you no longer know it, erase NVS - see below.
-3. Open the portal and either set a new Web UI password there, or read the current one from the success message.
+2. Join the AP using your setup AP password. If you never changed it from the shipped value, that is `HomeKey$123$`; if you do not know it, erase NVS - see below.
+3. Open `http://192.168.4.1` and set a new Web UI username and password on the setup page.
 
-If all of that fails, erase NVS over USB and start fresh - the device then generates new credentials and reports them on the serial console:
+> The address has to be typed. Phones will not pop the "Sign in to network" sheet on their own, because the probe requests they send use a foreign `Host` header and are rejected.
+
+### Lost the setup AP password
+
+Erase NVS over USB. That returns the device to a factory-fresh state, so the first-run setup screen appears again and you can choose all four credentials from scratch:
 
 ```bash
 pio run -t erase   # or: esptool.py erase_flash
 pio run -t upload
 ```
+
+> [!WARNING]
+> Erasing NVS also removes the Wi-Fi credentials, the HomeKit pairing and every HomeKey enrolment, so the device has to be set up and paired again.
 
 Erasing NVS removes the Wi-Fi credentials, the HomeKit pairing and the HomeKey data, so only do it when you have physical access and can re-pair.
 

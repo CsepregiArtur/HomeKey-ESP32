@@ -119,6 +119,8 @@ export interface CaptivePortalConfig {
   accessPointPassword?: string;
   /** Whether Web UI authentication is enabled */
   webAuthEnabled?: boolean;
+  /** True once the first-run credential setup has been completed in the Web UI */
+  setupCompleted?: boolean;
   /** Web UI username; the password is never sent back, it is reported once on save */
   webUsername?: string;
   /** New Web UI password; leave empty to keep the stored/generated one */

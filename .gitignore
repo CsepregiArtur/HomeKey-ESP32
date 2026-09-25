@@ -35,3 +35,4 @@ littlefs.bin
 # Python bytecode
 __pycache__/
 *.pyc
+.codegraphy/*
