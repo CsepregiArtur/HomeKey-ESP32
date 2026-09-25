@@ -75,6 +75,15 @@ Notable changes per release. User-facing detail lives in the docs:
   that will not survive a reboot is no longer announced. The boot log additionally warns
   when NVS is running low, since a full partition fails *every* write - including updates
   to values that already exist, because NVS appends a new entry per change.
+* **Every timestamp the device reported was seconds since boot.** Nothing ever set the
+  clock: there is no RTC, no time source, and `wallClockSeconds()` in `MqttManager` and
+  `AuditManager` deliberately falls back to uptime whenever `time()` looks unset. With
+  nothing to set it, that fallback was permanent, so lock changes, HomeKey authorisations,
+  audit records and backups all carried an uptime where a date belongs - which is why Home
+  Assistant showed 1970 for the last authentication and why "when did this door open" had
+  no answer. SNTP now starts when the station interface comes up, and the boot log reports
+  the first successful sync. Verified on the device: it reports an epoch within a second of
+  the host clock.
 
 ### Known issues
 

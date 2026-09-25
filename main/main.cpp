@@ -5,6 +5,8 @@
 #include "config.hpp"
 #include <esp_event.h>
 #include <esp_timer.h>
+#include <esp_netif_sntp.h>
+#include <ctime>
 #include "dns_server.h"
 #include "HomeKitLock.hpp"
 #include "LockManager.hpp"
@@ -183,6 +185,50 @@ static void start_captive_portal(void)
     ESP_LOGI("Main", "DNS server started for captive portal");
 }
 
+namespace {
+
+/**
+ * Start SNTP once the station interface is up.
+ *
+ * The device has no RTC and nothing else ever sets the clock: wallClockSeconds() in
+ * MqttManager and AuditManager deliberately falls back to seconds since boot while time()
+ * looks unset. With no time source that fallback is permanent, so every timestamp the
+ * firmware reports - lock changes, HomeKey authorisations, audit records, backups - is an
+ * uptime rather than a date, and "when did this door open" has no answer to give.
+ *
+ * Started here because SNTP needs a route to somewhere, and asynchronously because nothing
+ * should wait for the first reply.
+ */
+void startNetworkTime() {
+  static bool started = false;
+  if (started) {
+    return;
+  }
+  esp_sntp_config_t config = ESP_NETIF_SNTP_DEFAULT_CONFIG("pool.ntp.org");
+  const esp_err_t err = esp_netif_sntp_init(&config);
+  if (err != ESP_OK) {
+    ESP_LOGW("Time", "Could not start SNTP (%s); timestamps stay as seconds since boot.",
+             esp_err_to_name(err));
+    return;
+  }
+  started = true;
+  ESP_LOGI("Time", "SNTP started against pool.ntp.org.");
+}
+
+/// Report the first successful sync once, so a boot log says whether times became real.
+void reportClockSync() {
+  static bool reported = false;
+  // The same threshold wallClockSeconds() uses to decide the clock is real, rather than a
+  // separate status call: one definition of "time is set" is easier to keep true.
+  if (reported || time(nullptr) <= 1000000000) {
+    return;
+  }
+  reported = true;
+  ESP_LOGI("Time", "Clock synced: epoch %lld.", static_cast<long long>(time(nullptr)));
+}
+
+} // namespace
+
 std::function<void(int)> lambda = [](int status) {
   if (status == 1) {
     char identifier[18];
@@ -192,6 +238,8 @@ std::function<void(int)> lambda = [](int status) {
     // The web server only starts once the station interface is up, so this is the first
     // moment the API has a real port worth advertising.
     discoveryAdvertiser.onNetworkUp();
+    // The same moment and the same reason: there is a route for SNTP to reach a server on.
+    startNetworkTime();
   } else if (status == 0){
     pollHS = false;
     mqttManager->end();
@@ -513,6 +561,9 @@ void loop() {
 
   // Self-heals the mDNS record if HomeSpan tore the responder down underneath us.
   discoveryAdvertiser.refresh();
+
+  // Logs once when SNTP first answers, so the boot log says whether times are real yet.
+  reportClockSync();
 
   // Publish household node telemetry on a slow cadence so the MQTT entities
   // (state/health/security/backup) stay fresh without hammering NVS or MQTT.
