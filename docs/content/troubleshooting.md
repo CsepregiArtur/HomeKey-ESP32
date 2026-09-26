@@ -14,7 +14,7 @@ If you never changed the setup AP password from the shipped value, it is `HomeKe
 
 ## Over-the-air uploads are refused
 
-There is no OTA path. The single-slot layout has no second application slot and no `otadata`, so `espota`, the Web UI uploader and the GitHub updater are all gone. Install firmware over serial (`idf.py -p <port> flash` or `pio run -t upload`). See [Single-slot layout](SINGLE_SLOT_LAYOUT).
+There is no OTA path. The single-slot layout has no second application slot and no `otadata`, so `espota`, the Web UI uploader and the GitHub updater are all gone. Install firmware over serial (`idf.py -p <port> flash` or `pio run -t upload`). See [Single-slot layout](single_slot_layout).
 
 ## Requests are rejected with 401 even though the password is correct
 

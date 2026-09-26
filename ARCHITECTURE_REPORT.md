@@ -54,7 +54,7 @@ preserved, and how the new modules map onto the current codebase.
 - `mqttConfig_t` (broker, creds, topics composed from `platform_create_id_string()`, flags, SSL).
 - `mqtt_ssl_t` (caCert/clientCert/clientKey).
 - `https_certs_t` (serverCert/privateKey/caCert).
-- `misc_config_t` (device name, setup code, OTA pwd, HomeKey color, reader type/pins, eth, web auth, HTTPS, AP password, …).
+- `misc_config_t` (device name, setup code, HomeKey color, reader type/pins, eth, web auth, HTTPS, AP password, …).
 - `actions_config_t` (NeoPixel, GPIO feedback, relay, alt action, dumb-switch).
 - Secret masking: `espConfig::isSecretKey()` (any key containing `Password`/`Passwd`),
   `MASKED_SECRET = "********"`. Write path refuses to store the mask.
@@ -92,15 +92,21 @@ Apple Home app. This cannot be safely automated and is documented as a hard limi
 ### 1.7 Web server (`WebServerManager`)
 - `esp_http_server` / `esp_https_server`; static LittleFS assets (brotli/gzip), WebSocket (`/ws`).
 - Routes: `/config`, `/config/save`, `/config/clear`, `/eth_get_config`, `/nfc_get_presets`,
-  `/reboot_device`, `/reset_hk_pair`, `/reset_wifi_cred`, `/start_config_ap`, `/ota/*`,
-  `/certificates` (POST/GET/DELETE), catch-all `/*`.
+  `/reboot_device`, `/reset_hk_pair`, `/reset_wifi_cred`, `/start_config_ap`,
+  `/certificates` (POST/GET/DELETE), `/api/ha/*` (Home Assistant direct API),
+  catch-all `/*`. There is no `/ota/*`: the single-slot layout has nowhere to write an
+  image (see `docs/content/SINGLE_SLOT_LAYOUT.md`).
 - Captive portal route set under `setupCaptivePortalRoutes()`.
 - Hardening: `hostHeaderAllowed()` (DNS rebinding), POST-only state changes, constant-time auth.
 
-### 1.8 Certificates & OTA
+### 1.8 Certificates
 - Certificates stored via `ConfigManager` (`saveCertificate`/`loadCertificate`/`getCertificatesStatus`),
-  validated with mbedTLS; used for HTTPS (server cert/key + optional CA for mTLS) and MQTT TLS.- OTA: `handleOTAUpload` (firmware + LittleFS), streaming task, progress broadcast.
-  Optional image signature verification via `CONFIG_SECURE_SIGNED_APPS_NO_SECURE_BOOT`.
+  validated with mbedTLS; used for HTTPS (server cert/key + optional CA for mTLS) and MQTT TLS.
+- **No OTA.** The device ships a single-slot layout (`no_ota.csv`): one `factory`
+  application partition of 3840 KiB, no `otadata` and no second slot. The firmware upload
+  handler, the GitHub updater and HomeSpan's OTA service were all removed with it, and so
+  was `CONFIG_SECURE_SIGNED_APPS_NO_SECURE_BOOT` - it existed to authenticate an
+  over-the-air image. Firmware is installed over serial.
 
 ## 2. Target design (Household / Node)
 

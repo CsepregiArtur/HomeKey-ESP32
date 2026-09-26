@@ -97,10 +97,11 @@ Nothing in this plan is outstanding. Two things are deliberately out of scope:
   the same entity ids. It was deleted, and the work was moved into the existing one as an
   additional transport.
 
-- **Firmware version bump.** `HK_APP_VERSION` and `data/package.json` feed the OTA
-  comparison against GitHub releases, and the Web UI version only moves when the Svelte
-  bundle is rebuilt and reflashed. That is a release decision, not an implementation
-  detail.
+- **Firmware version bump.** `HK_APP_VERSION` and `data/package.json` feed the reported
+  firmware version, and the Web UI version only moves when the Svelte bundle is rebuilt
+  and reflashed. That is a release decision, not an implementation detail. (This note
+  originally said the constants fed "the OTA comparison against GitHub releases"; there is
+  no over-the-air path any more, so nothing compares against GitHub at runtime.)
 
 ---
 
@@ -346,11 +347,14 @@ would mean asking the user for a recovery secret the transport does not need.
 - **`[x]`** The integration's own `README.md` documents both transports, the trust model,
 the polling behaviour and the `/api/ha` surface.
 - **`[x]`** API contract and the `proto` versioning rule documented here.
-- **`[ ]` Firmware version bump deliberately not done.** `HK_APP_VERSION` and
-  `data/package.json` affect the OTA comparison against GitHub releases, and the UI version
-  only changes if the Svelte bundle is rebuilt and reflashed — against a filesystem
-  partition with very little headroom. That is a release decision, not an implementation
-  detail, so it is left to the maintainer rather than changed blind.
+- **`[x]`** Firmware version bumped to `0.11.0` as part of the single-slot layout change
+  (`HK_APP_VERSION`, `data/package.json`, `CHANGELOG.md`), and the Svelte bundle was
+  rebuilt and reflashed with it. The filesystem partition is no longer the constraint it
+  was: the UI payload is ~90 KiB of a 128 KiB partition, and the application partition has
+  ~53% free. A `v0.11.0` tag is still needed for the device to *report* 0.11.0, because the
+  root `CMakeLists.txt` prefers `git describe --tags` for a tag-descended tree.
+  The old note about this affecting "the OTA comparison against GitHub releases" no longer
+  applies: there is no OTA path at all.
 
 ---
 

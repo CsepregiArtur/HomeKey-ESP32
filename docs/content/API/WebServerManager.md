@@ -4,7 +4,7 @@ title: "WebServerManager"
 
 ## Overview
 
-The `WebServerManager` class implements a full-featured web server running on the ESP32. It is designed to provide a comprehensive web-based user interface for device configuration, status monitoring, and management. The server handles RESTful API endpoints for configuration changes, provides a real-time status dashboard via WebSockets, and includes robust implementations for Over-the-Air (OTA) updates and SSL/TLS certificate management.
+The `WebServerManager` class implements a full-featured web server running on the ESP32. It is designed to provide a comprehensive web-based user interface for device configuration, status monitoring, and management. The server handles RESTful API endpoints for configuration changes, provides a real-time status dashboard via WebSockets, and includes SSL/TLS certificate management.
 
 The class serves all static front-end assets (HTML, CSS, JavaScript) from an onboard LittleFS filesystem and can be protected with Basic HTTP Authentication.
 
@@ -14,7 +14,6 @@ The class serves all static front-end assets (HTML, CSS, JavaScript) from an onb
 *   **Static File Serving:** Serves the web UI assets, with support for gzip-compressed files.
 *   **Configuration API:** Provides REST endpoints to get, save, and clear device configurations (e.g., MQTT, miscellaneous settings).
 *   **WebSocket Communication:** Manages WebSocket connections for pushing real-time device metrics and status updates to connected clients.
-*   **Over-the-Air (OTA) Updates:** Implements a resilient, asynchronous OTA process for both firmware and LittleFS filesystem images.
 *   **Certificate Management:** Offers API endpoints for uploading, deleting, and checking the status of SSL/TLS certificates for secure MQTT.
 *   **System Actions:** Exposes endpoints to trigger system-level actions like rebooting, resetting HomeKit pairings, or resetting Wi-Fi credentials.
 *   **Authentication:** Enforces Basic HTTP Authentication for all endpoints if enabled in the configuration.
@@ -36,7 +35,7 @@ WebServerManager(ConfigManager& configManager, NvsCredentialStore& readerDataMan
 
 ### ~WebServerManager()
 
-Destructor for the `WebServerManager`. It ensures a clean shutdown by stopping the HTTP server, deleting the status timer, and cleaning up any resources allocated for asynchronous OTA operations.
+Destructor for the `WebServerManager`. It ensures a clean shutdown by stopping the HTTP server and deleting the status timer.
 
 **Signature:**
 ```cpp
@@ -104,12 +103,14 @@ These endpoints are available when the device is in Access Point configuration m
 *   `POST /reset_wifi_cred`: Erases saved Wi-Fi credentials and reboots.
 *   `POST /start_config_ap`: Stops the web server and puts the device into Wi-Fi Access Point mode for configuration.
 
-### Over-the-Air (OTA) Updates
+### Over-the-Air (OTA) Updates — none
 
-Both OTA uploads share a single `POST /ota/*` route; the last URI segment selects the upload type:
-
-*   `POST /ota/upload?skipReboot=<bool>`: Initiates an asynchronous firmware update. The binary firmware file should be the request body. The optional `skipReboot=true` query parameter prevents the automatic reboot after a successful update.
-*   `POST /ota/littlefs?skipReboot=<bool>`: Initiates an asynchronous update of the LittleFS filesystem. The filesystem image should be the request body.
+There is no OTA route. The device uses a single-slot flash layout: one `factory` application
+partition and no OTA data partition, so a firmware image has nowhere to be written and no
+second slot to switch to. The former `POST /ota/*` upload endpoint, the `/ota/release` and
+`/ota/install` GitHub-update routes, and the HomeSpan OTA service are all gone. Firmware and
+the LittleFS web UI image are installed over serial - see
+[Single-slot layout](../../single_slot_layout/).
 
 ### Certificate Management
 
@@ -142,10 +143,6 @@ The server pushes the following JSON messages to all connected clients:
     *   `mqtt_connected`: MQTT broker connection status (true if connected to the MQTT broker)
     *   `mqtt_error_code`: MQTT error code when connection fails (0 = no error, 1 = connection refused, 2 = auth failed, 3 = network error, 4 = SSL error, 5 = timeout, 255 = unknown)
     *   `mqtt_error_message`: Human-readable error message when MQTT connection fails
-*   **OTA Status (`ota_status`)**: Pushed during an OTA update.
-    ```json
-    {"type":"ota_status","in_progress":true,"progress_percent":50.5,...}
-    ```
 
 ### Client-to-Server Messages
 
@@ -162,10 +159,6 @@ Clients can send JSON messages to request information or adjust runtime settings
 *   **Request System Info**: The server will respond with the `sysinfo` message.
     ```json
     {"type":"sysinfo"}
-    ```
-*   **Request OTA Info**: The server will respond with the current `ota_status`.
-    ```json
-    {"type":"ota_info"}
     ```
 *   **Set Log Level**: Sets the global log level (0–5; `ERROR`=1, `WARN`=2, `INFO`=3, `DEBUG`=4, `VERBOSE`=5) at runtime and persists it to NVS. The server responds with the updated `sysinfo`.
     ```json

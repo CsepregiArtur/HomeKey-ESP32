@@ -18,7 +18,7 @@
 > | Scope | Single device | **Household** of multiple nodes |
 > | Backup / provisioning | — | Encrypted+signed backup; one-time join codes |
 > | MQTT | Legacy topics | **+ household namespace**, HA discovery, HMAC commands |
-> | Web UI | Misc/MQTT/OTA/Logs | **+ household, node, health, security, audit, backup, recovery, provision** |
+> | Web UI | Misc/MQTT/OTA/Logs | **+ household, node, health, security, audit, backup, recovery, provision**; the OTA page is **removed** |
 > | Flash encryption | **Disabled** | **Supported** (off by default) |
 > | Secure Boot | **Disabled** | **Supported** (off by default, V1 ECDSA-P256) |
 > | NVS encryption | **Disabled** | **Supported** (off by default) |
@@ -49,12 +49,12 @@ The tagline: *"Apple HomeKey functionality for the rest of us"* — no proprieta
 | **Apple HomeKey** | Express Mode, Power Reserve, iPhone + Apple Watch, sub-300 ms taps |
 | **HomeKit** | Native Apple Home integration via HomeSpan (lock, NFC service, battery) |
 | **MQTT** | Home Assistant / OpenHAB integration, HA auto-discovery, tag events |
-| **Web UI** | Svelte 5 + Tailwind SPA for configuration, logs, OTA |
+| **Web UI** | Svelte 5 + Tailwind SPA for configuration, logs and diagnostics |
 | **Captive portal** | First-boot Wi-Fi + HomeKit configuration without recompiling |
-| **OTA** | Firmware and LittleFS (web UI) updates over the network |
+| **Updates** | **Serial only.** A single-slot flash layout with no over-the-air path: nothing reachable over the network can replace the firmware |
 | **Hardware actions** | Relays/GPIO, NeoPixels, feedback LEDs, alternate action button |
 | **Ethernet** | Wired networking as an alternative to Wi-Fi |
-| **Security** | First-run credential setup, Web UI auth, HTTPS/mTLS, OTA verification, **optional flash encryption + Secure Boot V1 + NVS encryption** (disabled by default), HMAC-authenticated MQTT commands, encrypted signed backups |
+| **Security** | First-run credential setup, Web UI auth, HTTPS/mTLS, **optional flash encryption + Secure Boot V1 + NVS encryption** (disabled by default), HMAC-authenticated MQTT commands, encrypted signed backups |
 
 ---
 
@@ -100,7 +100,7 @@ The design is a **pub/sub event bus** (`app_events.hpp` + `app_event_loop`) — 
 
 ### 4.1 Application entry — `main.cpp`
 - Boot sequence: GPIO/UART init, NVS init, logging init, default event loop, **reset-reason reporting** (distinguishes panic/WDT/brownout from a clean boot), `ConfigManager::begin()`, `securityInit()`, then constructs all managers.
-- **First-run security**: a factory-fresh device keeps the shipped placeholder credentials, leaves Web UI authentication **off** and shows a blocking setup screen in the Web UI, where the user chooses the **Setup Code, setup AP password, OTA password and Web UI password**. Submitting it sets `setupCompleted` and turns authentication on. Already-configured devices are migrated to `setupCompleted` automatically and never rewritten.
+- **First-run security**: a factory-fresh device keeps the shipped placeholder credentials, leaves Web UI authentication **off** and shows a blocking setup screen in the Web UI, where the user chooses the **Setup Code, setup AP password and Web UI password**. Submitting it sets `setupCompleted` and turns authentication on. Already-configured devices are migrated to `setupCompleted` automatically and never rewritten.
 - The setup AP advertises as **WPA2-PSK with CCMP** rather than WPA2/WPA3 mixed mode, because the mixed-mode WPA3 cipher suite caused association failures ("connection timeout") on a range of clients.
 - Runs the AP/captive-portal workflow when there is no working network, and the main loop (`homeSpan.poll()` + 50 ms yield).
 
@@ -138,9 +138,9 @@ Interface covers lifecycle (`init`/`stop`/`isConnected`), firmware version, disc
 ### 4.7 `WebServerManager` — HTTP/HTTPS + WebSocket
 - `esp_http_server` (HTTP) and `esp_https_server` (TLS) with static file serving from LittleFS (brotli/gzip/uncompressed).
 - REST endpoints for config get/save/clear, NFC presets, Wi-Fi scan, captive-portal config, reboot, HomeKit reset, Wi-Fi reset, start AP, metrics/info.
-- **OTA upload** (firmware + LittleFS) with task-based streaming and progress broadcast.
 - **Certificate management** (server cert/key, optional CA for mTLS), fingerprint/expiry reporting.
-- **WebSocket** for live logs, metrics and OTA progress (with drop counting/backpressure observability).
+- **WebSocket** for live logs, metrics and status (with drop counting/backpressure observability).
+- **No OTA route**: the single-slot layout has no second application slot and no `otadata`, so there is nowhere to write an image. Firmware is installed over serial.
 - Security hardening: `Host` header validation (DNS-rebinding), POST-only state changes, constant-time credential comparison with failure delay, secret masking.
 
 ### 4.8 `HardwareManager` — physical I/O
@@ -192,7 +192,7 @@ The project notes an upcoming Aliro-based successor supporting flash encryption 
 ## 7. Web interface (`data/`)
 
 - **Svelte 5 + TypeScript + Tailwind CSS 4 + daisyUI**, router via `sv-router`, built with Vite.
-- Pages/routes: **Info** (device metrics, NFC/MQTT status, HomeKey reader GID/ID/issuers), **MQTT** (broker, TLS, topics, custom states, HA discovery), **Actions** (NeoPixel/GPIO/relay/state triggers, alternate action), **System/Misc** (HomeKit identity, hardware pins, Ethernet, HomeSpan, Security/HTTPS/certs), **OTA Update**, **Logs** (virtualized live stream, level filter, JSON export), **Captive Portal** (Wi-Fi scan + first-boot setup).
+- Pages/routes: **Info** (device metrics, NFC/MQTT status, HomeKey reader GID/ID/issuers), **MQTT** (broker, TLS, topics, custom states, HA discovery), **Actions** (NeoPixel/GPIO/relay/state triggers, alternate action), **System/Misc** (HomeKit identity, hardware pins, Ethernet, HomeSpan, Security/HTTPS/certs), **Logs** (virtualized live stream, level filter, JSON export), **Captive Portal** (Wi-Fi scan + first-boot setup).
 - Live data over WebSocket; assets brotli-compressed (91 kB) to fit the 128 kB filesystem partition.
 
 ---
@@ -229,9 +229,9 @@ Example auth payloads:
 ## 9. Security model (documented in `docs/content/security.md`)
 
 **Default (no config):**
-- First-run setup screen asks the user to choose the Setup Code, setup AP password, OTA password and Web UI password. Nothing is generated or logged.
+- First-run setup screen asks the user to choose the Setup Code, setup AP password and Web UI password. Nothing is generated or logged.
 - Web UI authentication stays off until that screen is saved; secrets are never returned to the browser (masked as `********`).
-- HomeSpan `espota` disabled until a custom OTA password is set.
+- **There is no over-the-air path any more**, so there is no OTA password and no firmware upload endpoint to protect. Nothing on the network can replace the firmware; a serial flash is required.
 - The setup AP password is the shipped `HomeKey$123$` until the user changes it during setup; HomeSpan's own AP is aligned with it so the published `homespan` value never opens either one.
 - Temporary WPA2-PSK (CCMP) AP (max 2 clients, idle restart after 10 min).
 - POST-only + `Host`-validated state changes; login throttling (2 s after 5 failures).
@@ -241,7 +241,6 @@ Example auth payloads:
 - Web UI auth + HTTPS/mTLS with uploaded certificates.
 - MQTT TLS + per-device broker user/ACL (MQTT is an unlock path).
 - Network segmentation (IoT SSID/VLAN).
-- Optional OTA image signature verification (`CONFIG_SECURE_SIGNED_APPS_NO_SECURE_BOOT`, no eFuses needed).
 
 **Explicit non-goal:** flash encryption / secure boot — physical USB access is considered a full compromise by design, to avoid forcing every deployed device to be re-provisioned.
 

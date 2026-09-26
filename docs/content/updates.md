@@ -15,7 +15,7 @@ weight: 5
 >
 > A partition table cannot be delivered over the air - the node writes a new image into a
 > slot that the *old* table describes - so moving an existing device onto this layout needs
-> one serial flash. See **[Single-slot layout](SINGLE_SLOT_LAYOUT)**.
+> one serial flash. See **[Single-slot layout](single_slot_layout)**.
 
 This document outlines different methods for updating the firmware on your HomeKey-ESP32 device. Keeping your device up-to-date ensures you have the latest features, bug fixes, and security enhancements.
 

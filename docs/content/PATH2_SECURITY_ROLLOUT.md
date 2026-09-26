@@ -5,7 +5,7 @@
 > **Decision date:** 2026-09-25
 > **Owner:** @CsepregiArtur
 > **Revised:** 2026-09-26 — rewritten for the single-slot (no OTA) layout; see
-> [Single-slot layout](SINGLE_SLOT_LAYOUT).
+> [Single-slot layout](single_slot_layout).
 
 This document records the deliberate two-step approach to hardware security on
 this fork, why it is split in two, and exactly what changes when Path 2 is
@@ -333,4 +333,4 @@ them being repeated:
 - [`security.md`](./security.md) — security feature overview
 - [`fork-vs-upstream.md`](./fork-vs-upstream.md) — fork vs. upstream differences
 - [`updates.md`](./updates.md) — serial update procedure and breaking changes
-- [`SINGLE_SLOT_LAYOUT.md`](./SINGLE_SLOT_LAYOUT.md) — the layout this plan targets
+- [`SINGLE_SLOT_LAYOUT.md`](./single_slot_layout/) — the layout this plan targets

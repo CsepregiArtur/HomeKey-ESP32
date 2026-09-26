@@ -48,7 +48,7 @@ HomeKitLock(
 Initializes and starts all HomeKit-related services. This is the main entry point for the class and must be called after the constructor.
 
 **It performs the following key actions:**
-1.  Configures HomeSpan settings (e.g., control pin, status pin, OTA password, device name) from `ConfigManager`.
+1.  Configures HomeSpan settings (e.g., control pin, status pin, device name) from `ConfigManager`.
 2.  Calls `initializeETH()` to set up the Ethernet connection if enabled.
 3.  Starts the HomeSpan stack, advertising the device as a HomeKit lock.
 4.  Builds the accessory hierarchy, adding all required and optional services (Lock Mechanism, NFC Access, Battery Service, etc.).

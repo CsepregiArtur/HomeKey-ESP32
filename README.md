@@ -88,8 +88,9 @@ The project aims to be the easy DIY solution for using Apple's HomeKey feature w
 >   re-provisioned. Wi-Fi credentials, HomeKit pairing and HomeKey reader
 >   enrolment stored on the device **are lost and cannot be recovered**.
 > - The partition layout changes (`nvs_keys` added, partition table moved to
->   `0xD000`, app offsets realigned), so an OTA update from an older build will not
->   boot — a serial flash is required.
+>   `0xD000`, app offsets realigned), so firmware from an older build cannot be
+>   installed by any route but a serial flash — and there is no OTA path on the
+>   current single-slot layout in any case.
 > - Every future firmware image must be signed with the Secure Boot key; you can
 >   no longer flash arbitrary unsigned binaries.
 > - The flash-encryption key and the signing key must both be backed up

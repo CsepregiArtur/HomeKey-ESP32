@@ -47,7 +47,7 @@ These protections are active without any configuration:
 
 * **Secrets are never sent to the browser.** Configuration reads return `********` for every `*Password`/`*Passwd` field, and the write path refuses to store that placeholder, so a stale form cannot overwrite a real password with the mask.
 
-* **There is no over-the-air update path at all.** The single-slot flash layout has one application partition and no OTA data partition, so no image can be written over the network and there is no second slot to switch to afterwards. HomeSpan's OTA service is never enabled, the OTA password is gone, and the `/ota/*` upload endpoints and the "update from GitHub" routes do not exist. **That removes a whole class of risk: nothing reachable over the network can replace this device's firmware - signed or not.** Firmware and the web UI image are installed over serial; see [Single-slot layout](SINGLE_SLOT_LAYOUT).
+* **There is no over-the-air update path at all.** The single-slot flash layout has one application partition and no OTA data partition, so no image can be written over the network and there is no second slot to switch to afterwards. HomeSpan's OTA service is never enabled, the OTA password is gone, and the `/ota/*` upload endpoints and the "update from GitHub" routes do not exist. **That removes a whole class of risk: nothing reachable over the network can replace this device's firmware - signed or not.** Firmware and the web UI image are installed over serial; see [Single-slot layout](single_slot_layout).
 
 * **The setup access point password is the documented default until you change it.** Two APs can appear while a device has no network: the project's own `HK_XXXXXX` captive portal and HomeSpan's `HomeSpan-Setup`. Both use the setup AP password so they cannot be opened with two different published values. On a device that has not been through first-run setup that value is `HomeKey$123$`, so **set your own on the setup screen** - the AP only exists before the device is provisioned, but it is still a way in while it is up.
 
@@ -92,11 +92,12 @@ The lock subscribes to command topics such as `homekit/set_target_state` and `ho
 
 Put the lock on an IoT SSID or VLAN that cannot reach your computers, and block client-to-client traffic if your AP supports it. The device speaks plain HTTP on the local network by default, so a segmented network is what keeps that acceptable.
 
-### Verify OTA images — no longer applies
+### Verify OTA images
 
 > [!NOTE]
-> Kept for history. The current layout has no over-the-air update path, so there is no
-> image to verify: `CONFIG_SECURE_SIGNED_APPS_NO_SECURE_BOOT` and its siblings are off in
+> **This section no longer applies** and is kept for history. The current layout has no
+> over-the-air update path, so there is no image to verify:
+> `CONFIG_SECURE_SIGNED_APPS_NO_SECURE_BOOT` and its siblings are off in
 > `sdkconfig.defaults`, the security posture no longer reports an `ota_signature` finding,
 > and a serial flash was never covered by them in the first place.
 

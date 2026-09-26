@@ -124,7 +124,7 @@ What a build reports:
 | From a branch with no reachable tag | `0.10.0-dev+<commit>` |
 | ... and with uncommitted changes | `0.10.0-dev+<commit>-dirty` |
 
-The value is visible in the Web UI (OTA page and device info panel) and in HomeKit as the
+The value is visible in the Web UI (device info panel) and in HomeKit as the
 firmware revision. Tag releases as `vX.Y.Z`: `wiki.yml` publishes every `v*` tag that
 contains a `docs/` directory under `/<tag>/`, which is what the version switcher in
 `docs/hugo.yaml` links to. Add a matching section to `CHANGELOG.md`.

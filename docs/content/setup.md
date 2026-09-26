@@ -18,7 +18,7 @@ First things first, let's get the brains of your HomeKey-ESP32 onto your compute
     * **`*.firmware.bin`**: This file contains only the application firmware. It is written at the application partition offset over serial - there is no over-the-air update.
     * **`littlefs.bin`**: This file contains the web interface files, written to the filesystem partition over serial.
 
-    Firmware and the web interface are both installed over serial. See the [Updates Guide](../updates) and [Single-slot layout](../SINGLE_SLOT_LAYOUT).
+    Firmware and the web interface are both installed over serial. See the [Updates Guide](../updates) and [Single-slot layout](../single_slot_layout).
 
 ## 2. Connect Your Hardware
 
@@ -135,7 +135,7 @@ After flashing, your HomeKey-ESP32 is ready for initial configuration.
     * **Wi-Fi & HomeKit:** Scan and select Wi-Fi network, enter password, set 8-digit HomeKit pairing code, select HomeKey pass color (Tan, Gold, Silver, Black), configure AP Access Point Password (`accessPointPassword`), and optionally enable Web UI authentication with your own username/password.
     * **Hardware Tab:** Select NFC reader type (PN532, PN7161 or ST25R3916) and presets, assign custom NFC GPIO pins (including IRQ and VEN for PN7161), configure Ethernet settings, and see strapping pin restrictions on conflicting assignments. Override strapping pin restrictions if required by custom hardware (`overrideStrappingRestriction`).
 4. **Save & Connect:** Upon clicking "Save", the captive portal submits configuration diffs and connects to your Wi-Fi network. On successful connection, the interface displays the assigned network IP address before closing.
-5. **Finish first-run setup:** Open the device's Web UI on your network. A blocking setup screen asks for your Web UI username and password, HomeKit Setup Code, OTA password and setup AP password. Until you save it the Web UI has **no login** - see [Security]({{< ref "security" >}}).
+5. **Finish first-run setup:** Open the device's Web UI on your network. A blocking setup screen asks for your Web UI username and password, HomeKit Setup Code and setup AP password. Until you save it the Web UI has **no login** - see [Security]({{< ref "security" >}}).
 
 ## 5. HomeKit Pairing
 
