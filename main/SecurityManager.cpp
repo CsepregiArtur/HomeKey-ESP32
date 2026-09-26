@@ -41,12 +41,6 @@ SecurityManager::Posture SecurityManager::compute() const {
     addFinding(posture, "nvs_encryption", "WARNING", "NVS encryption disabled.");
 #endif
 
-#ifdef CONFIG_SECURE_SIGNED_APPS_NO_SECURE_BOOT
-    addFinding(posture, "ota_signature", "OK", "OTA image signature verification enabled.");
-#else
-    addFinding(posture, "ota_signature", "WARNING", "OTA signature verification disabled.");
-#endif
-
     const auto &misc = m_config.getConfig<espConfig::misc_config_t>();
     const auto &mqtt = m_config.getConfig<espConfig::mqttConfig_t>();
 
@@ -68,13 +62,6 @@ SecurityManager::Posture SecurityManager::compute() const {
     } else {
         addFinding(posture, "web_auth", "WARNING",
                    "Web UI authentication disabled; anyone on the network can reconfigure the device.");
-    }
-
-    if (misc.otaPasswd.empty() || misc.otaPasswd == OTA_PWD) {
-        addFinding(posture, "homespan_ota", "DISABLED",
-                   "HomeSpan OTA disabled while the OTA password is unset/stock.");
-    } else {
-        addFinding(posture, "homespan_ota", "OK", "HomeSpan OTA password set.");
     }
 
     return posture;

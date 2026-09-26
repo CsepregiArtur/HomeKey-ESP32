@@ -89,7 +89,7 @@ void HomeKitLock::initializeETH() {
 /**
  * @brief Initialize HomeSpan, expose lock-related accessories/services, and register runtime callbacks.
  *
- * Configures HomeSpan using settings from ConfigManager (pins, OTA password, port, host name suffix), initializes reader data handling, creates the lock accessory and its services/characteristics (including lock mechanism, management, NFC access, protocol/version, and optional physical battery service), installs developer debug commands, and registers controller and connection callbacks.
+ * Configures HomeSpan using settings from ConfigManager (pins, port, host name suffix), initializes reader data handling, creates the lock accessory and its services/characteristics (including lock mechanism, management, NFC access, protocol/version, and optional physical battery service), installs developer debug commands, and registers controller and connection callbacks.
  */
 void HomeKitLock::begin() {
     m_lock_state_changed = AppEventLoop::subscribe(LOCK_EVENT, LOCK_STATE_CHANGED, [&](const uint8_t* data, size_t size){
@@ -145,17 +145,11 @@ void HomeKitLock::begin() {
     // the source tree. On a device that has not been through first-run setup that
     // value is still the shipped default; the setup screen is what changes it.
     homeSpan.setApPassword(miscConfig.accessPointPassword.c_str());
-    // HomeSpan's OTA service is an over-the-network firmware upload endpoint whose
-    // only protection is this password. The value shipped in defaults.h is public,
-    // so it is treated as "not configured": leaving OTA off is the safer default,
-    // and users who want it set their own password (Misc -> HomeSpan in the Web UI,
-    // which sends it through the normal config path).
-    if (miscConfig.otaPasswd.empty() || miscConfig.otaPasswd == OTA_PWD) {
-      ESP_LOGW(TAG, "HomeSpan OTA service not started: the OTA password is unset or still the "
-                    "shipped default. Set a custom one under Misc -> HomeSpan to enable it.");
-    } else {
-      homeSpan.enableOTA(miscConfig.otaPasswd.c_str());
-    }
+    // HomeSpan's own OTA service is deliberately not enabled. It is an over-the-network
+    // firmware upload endpoint, and this build has a single application slot with no OTA
+    // data partition, so there is nothing for it to write and nothing to switch to
+    // afterwards. The password it used to be gated on went with it. Firmware is installed
+    // over serial; see docs/content/SINGLE_SLOT_LAYOUT.md.
     homeSpan.setPortNum(1201);
     uint8_t mac[6];
     esp_read_mac(mac, ESP_MAC_BT);

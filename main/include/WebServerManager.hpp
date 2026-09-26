@@ -1,7 +1,6 @@
 #pragma once
 #include "cJSON.h"
 #include "esp_http_server.h"
-#include "esp_ota_ops.h"
 #include "esp_partition.h"
 #include "esp_timer.h"
 #include <cstdint>
@@ -127,48 +126,10 @@ private:
     WsClient(int file_descriptor) : fd(file_descriptor) {}
   };
 
-  enum class OTAUploadType { FIRMWARE, LITTLEFS };
-
-  struct OTAState {
-    esp_ota_handle_t handle = 0;
-    const esp_partition_t *updatePartition = nullptr;
-    const esp_partition_t *littlefsPartition = nullptr;
-    size_t writtenBytes = 0;
-    size_t totalBytes = 0;
-    bool skipReboot = false;
-    bool inProgress = false;
-    std::string error;
-    OTAUploadType currentUploadType = OTAUploadType::FIRMWARE;
-  };
-
-  struct OTAParams {
-    httpd_req_t *req;
-    WebServerManager *instance;
-    OTAUploadType uploadType;
-    bool skipReboot;
-    size_t contentLength;
-    OTAState *state;
-  };
-
-  /**
-   * @brief Work item for the "update from GitHub" path.
-   *
-   * Unlike OTAParams this carries no httpd_req_t: the image comes from GitHub over
-   * esp_http_client rather than from a browser upload, so the task owns the whole
-   * download -> flash -> reboot sequence.
-   */
-  struct GithubOtaParams {
-    WebServerManager *instance;
-    bool developmentChannel;
-    OTAState *state;
-  };
-
   // ------------------------------------------------------------------------
   // Static Task Callbacks
   // ------------------------------------------------------------------------
   static void ws_send_task(void *arg);
-  static void otaTask(void *pvParameters);
-  static void githubOtaTask(void *pvParameters);
   static void statusTimerCallback(void *arg);
 
   // ------------------------------------------------------------------------
@@ -186,9 +147,6 @@ private:
   static esp_err_t handleRootOrHash(httpd_req_t *req);
   static esp_err_t handleStaticFiles(httpd_req_t *req);
   static esp_err_t handleWebSocket(httpd_req_t *req);
-  static esp_err_t handleOTAUpload(httpd_req_t *req);
-  static esp_err_t handleGetReleaseInfo(httpd_req_t *req);
-  static esp_err_t handleInstallRelease(httpd_req_t *req);
   static esp_err_t handleCertificateUpload(httpd_req_t *req);
   static esp_err_t handleCertificateStatus(httpd_req_t *req);
   static esp_err_t handleCertificateDelete(httpd_req_t *req);
@@ -278,9 +236,6 @@ private:
   // Device info/status
   std::string getDeviceMetrics();
   std::string getDeviceInfo();
-  std::string getOTAInfo();
-  // OTA management
-  void broadcastOTAStatus(const OTAState& state);
 
   // Utility methods
   static bool validateRequest(httpd_req_t *req, cJSON *currentData,
@@ -340,7 +295,6 @@ private:
   std::deque<std::vector<uint8_t>> m_wsBroadcastBuffer;
   std::atomic<uint16_t> wsBacklogSize{0};
   std::atomic<uint64_t> m_wsFrameDropped{0};
-  std::atomic<bool> m_otaInProgress{false};
   // Recorded from the port httpd_ssl_start() actually chose (443 for TLS, 80 otherwise)
   // so that anything advertising the API advertises where it really is, and whether it
   // is really encrypted.

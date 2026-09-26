@@ -1,0 +1,35 @@
+# Name,   Type, SubType,  Offset,   Size,     Flags
+#
+# Single-slot (no OTA) layout for the 4 MB ESP32. This is the ACTIVE layout.
+#
+# The node no longer updates itself over the air, so the second application
+# slot and the OTA data partition that existed only to select between the two
+# are gone. What is freed goes to the application: one slot of 3840 KiB instead
+# of two of 1920 KiB.
+#
+#   region          before (with_ota.csv)      after (this file)
+#   --------------  -------------------------  -------------------------
+#   nvs              0x9000  24 KiB             0x9000  92 KiB
+#   otadata          0xF000   8 KiB             (removed)
+#   app0/OTA slot    0x20000 1920 KiB           0x20000 3840 KiB (factory)
+#   app1 (2nd slot)  0x200000 1920 KiB          (removed)
+#   spiffs           0x3E0000 128 KiB           0x3E0000 128 KiB
+#
+# Two deliberate choices:
+#
+#  * `nvs` keeps its offset (0x9000) and only grows, so the credentials that
+#    already live there - HomeKit pairing, Wi-Fi, reader identity, household -
+#    survive the reflash. Moving `nvs` would silently orphan all of them.
+#    See docs/content/SINGLE_SLOT_LAYOUT.md.
+#  * `app0` is subtype `factory`, which is what the bootloader boots when there
+#    is no OTA data partition to read. `ota_0` here would not start.
+#
+# With no OTA data partition, CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE must be off
+# (sdkconfig.defaults does that) - rollback is an OTA concept and has nothing
+# left to roll back to.
+#
+# Going back to OTA means re-flashing `with_ota.csv` over serial; OTA cannot
+# deliver its own replacement partition table. Procedure in the doc above.
+nvs,data,nvs,0x9000,0x17000,,
+app0,app,factory,0x20000,0x3C0000,,
+spiffs,data,spiffs,0x3E0000,0x20000,,

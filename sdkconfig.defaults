@@ -1,8 +1,12 @@
-CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
+# Single-slot (no OTA) flash layout: one application slot (`factory`), no OTA
+# data partition and no second slot. Rollback is an OTA concept and there is
+# nothing left to roll back to, so the bootloader option must be off.
+# Layout, trade-offs and the migration procedure: docs/content/SINGLE_SLOT_LAYOUT.md
+CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=n
 CONFIG_BOOTLOADER_LOG_LEVEL_ERROR=y
 CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
 CONFIG_PARTITION_TABLE_CUSTOM=y
-CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="with_ota.csv"
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="no_ota.csv"
 CONFIG_ARDUINO_USE_USB_JTAG=y
 CONFIG_AUTOSTART_ARDUINO=y
 CONFIG_ARDUINO_SELECTIVE_COMPILATION=y
@@ -131,4 +135,19 @@ CONFIG_ESP_SYSTEM_IN_IRAM=y
 #   Secure Boot : keys/secure_boot_signing_key.pem  (ECDSA-P256, ESP32 V1)
 #   Flash enc.  : keys/flash_encryption_key.bin     (AES-256, backup off-machine)
 # ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# OTA: REMOVED, so the signed-update verification that existed to police it is
+# gone too. Signing an application that can never be delivered over the air
+# only appended a 4 KiB signature block to the image and made the build depend
+# on a signing key. Boot verification was off in any case
+# (CONFIG_SECURE_SIGNED_ON_BOOT_NO_SECURE_BOOT), so a bad signature block could
+# never brick a USB-flashed board.
+#
+# A local `sdkconfig` may still carry the old `=y` values from a menuconfig
+# session; it is gitignored, so delete it and let this file regenerate it.
+# ---------------------------------------------------------------------------
+# CONFIG_SECURE_SIGNED_APPS_NO_SECURE_BOOT is not set
+# CONFIG_SECURE_SIGNED_ON_UPDATE_NO_SECURE_BOOT is not set
+# CONFIG_SECURE_SIGNED_ON_UPDATE is not set
 

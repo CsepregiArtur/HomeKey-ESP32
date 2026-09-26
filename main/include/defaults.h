@@ -60,12 +60,8 @@
 // reset performed by `idf.py flash`, before any monitor is attached, so it was easy to
 // miss - and once missed there was no way to recover the setup AP password.
 //
-// The shipped OTA password is treated as "not configured": while it is unchanged the
-// HomeSpan OTA service stays disabled, because it is a firmware upload endpoint that
-// anybody on the network could otherwise use.
 #define HOMEKEY_COLOR TAN
 #define SETUP_CODE "46637726"  // HomeKit Setup Code (only for reference, has to be changed during WiFi Configuration or from WebUI)
-#define OTA_PWD "homespan-ota" // Custom password for the HomeSpan OTA service; this shipped value means "not configured"
 #define DEVICE_NAME "HK" //Device name
 #define HOMEKEY_ALWAYS_UNLOCK 0 // Flag indicating if a successful Homekey authentication should always set and publish the unlock state
 #define HOMEKEY_ALWAYS_LOCK 0  // Flag indicating if a successful Homekey authentication should always set and publish the lock state

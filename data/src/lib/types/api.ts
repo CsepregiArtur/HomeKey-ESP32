@@ -147,8 +147,6 @@ export interface WiFiNetwork {
 export interface MiscConfig {
   /** Device name displayed in HomeKit and web interface */
   deviceName: string;
-  /** OTA update password for firmware updates */
-  otaPasswd: string;
   /** HomeKey LED color (RGB value) */
   hk_key_color: number;
   /** HomeKit setup code for pairing */
@@ -341,33 +339,6 @@ export interface NfcGpioPinsPreset {
     irqPin: number;
     venPin: number;
   }[];
-}
-
-/**
- * OTA (Over-The-Air) update status information
- * @type {OTAStatus}
- */
-export interface OTAStatus {
-  /** Message type identifier */
-  type: "ota_status" | "ota_info";
-  /** Whether an OTA update is currently in progress */
-  in_progress: boolean;
-  /** Number of bytes written so far */
-  bytes_written: number;
-  /** Type of upload (e.g., 'firmware', 'filesystem') */
-  upload_type: string;
-  /** Error message if update failed */
-  error?: string;
-  /** Current firmware version */
-  current_version: string;
-  /** Currently running partition */
-  running_partition: string;
-  /** Partition that will be used for the next update */
-  next_update_partition: string;
-  /** Update progress percentage (0-100) */
-  progress_percent?: number;
-  /** Total bytes to be written */
-  total_bytes?: number;
 }
 
 /**

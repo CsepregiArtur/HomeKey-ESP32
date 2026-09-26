@@ -196,7 +196,7 @@ const char *AuditManager::eventTypeName(uint8_t type) {
         case NODE_REVOCATION: return "node_revocation";
         case BACKUP_CREATED: return "backup_created";
         case BACKUP_RESTORED: return "backup_restored";
-        case OTA_UPDATE: return "ota_update";
+        case RETIRED_OTA_UPDATE: return "ota_update";
         case SECURITY_CONFIG_CHANGE: return "security_config_change";
         default: return "unknown";
     }

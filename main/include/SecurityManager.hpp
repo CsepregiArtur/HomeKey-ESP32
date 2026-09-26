@@ -6,8 +6,7 @@ class ConfigManager;
 
 /**
  * Read-only security posture. Reports named findings (never a numeric "score"):
- * secure boot, flash encryption, OTA signature verification, MQTT TLS, HTTPS,
- * Web UI auth and the HomeSpan OTA password. All findings are derived from
+ * secure boot, flash encryption, MQTT TLS, HTTPS and Web UI auth. All findings are derived from
  * compile-time configuration and runtime settings.
  */
 class SecurityManager {

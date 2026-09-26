@@ -5,10 +5,17 @@ weight: 5
 
 # Keeping Your HomeKey-ESP32 Fresh!
 
-> [!NOTE]
-> **Updating from upstream firmware requires a serial flash.** This fork accepts
-> upstream's partition layout by default, but the household schema migration is not
-> OTA-compatible in all cases — see the section below.
+> [!IMPORTANT]
+> **There is no over-the-air firmware update any more. Firmware is installed over serial only.**
+>
+> The device uses a single-slot flash layout (`no_ota.csv`): one `factory` application
+> partition instead of two OTA slots, and no `otadata`. The freed space went to the
+> application (3.3% free → 53% free) and to `nvs` (24 KiB → 92 KiB). Guidance below that
+> describes updating over the network, from the Web UI or from GitHub no longer applies.
+>
+> A partition table cannot be delivered over the air - the node writes a new image into a
+> slot that the *old* table describes - so moving an existing device onto this layout needs
+> one serial flash. See **[Single-slot layout](SINGLE_SLOT_LAYOUT)**.
 
 This document outlines different methods for updating the firmware on your HomeKey-ESP32 device. Keeping your device up-to-date ensures you have the latest features, bug fixes, and security enhancements.
 

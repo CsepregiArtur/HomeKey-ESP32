@@ -33,9 +33,9 @@
 
 **HomeKey-ESP32** is an open-source DIY firmware (MIT-licensed) that brings **Apple HomeKey** — the NFC-based "tap your iPhone/Apple Watch to unlock" feature — to ordinary ESP32 hardware. Instead of buying a HomeKey-certified smart lock, you wire an NFC reader to an ESP32, flash this firmware, and the device becomes a HomeKey reader plus a full smart-home lock accessory.
 
-- **Version:** `0.10.0` (household multi-node release, 2026-09-22)
+- **Version:** `0.11.0` (single-slot layout, no over-the-air update, 2026-09-26)
 - **Framework:** ESP-IDF ≥ 5.5.4 (CI builds against 5.5.5), C++ with heavy use of modern features
-- **Also buildable via PlatformIO** (`platformio.ini`, ESP-IDF framework, 4 MB flash / `with_ota.csv` partition table)
+- **Also buildable via PlatformIO** (`platformio.ini`, ESP-IDF framework, 4 MB flash / `no_ota.csv` single-slot partition table)
 - **Not affiliated with Apple**; the HomeKey protocol was reverse-engineered by the community
 
 The tagline: *"Apple HomeKey functionality for the rest of us"* — no proprietary hardware, just an ESP32 and a supported NFC module.
@@ -267,7 +267,7 @@ data/          Svelte 5 web UI (captive portal + main interface)
 docs/          Hugo documentation site
 scripts/       PlatformIO pre/post IDF + local IDF setup
 managed_components/  Registry dependencies
-sdkconfig.defaults[.esp32] / with_ota.csv / platformio.ini  Build configuration
+sdkconfig.defaults[.esp32] / no_ota.csv / platformio.ini  Build configuration
 ```
 
 ---

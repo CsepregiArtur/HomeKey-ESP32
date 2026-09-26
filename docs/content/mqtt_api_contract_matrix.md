@@ -307,19 +307,21 @@ write NVS.
 
 - Topic: `B/security`. Values: `OK` / `WARNING` (`ERROR` reserved, never emitted).
 - Source: `SecurityManager::compute()` → `HealthManager::snapshot().security_all_ok`.
-- Underlying checks: `secure_boot`, `flash_encryption`, `ota_signature`,
-  `mqtt_tls`, `https`, `web_auth`, `homespan_ota` (each OK/WARNING/DISABLED).
+- Underlying checks: `secure_boot`, `flash_encryption`,
+  `mqtt_tls`, `https`, `web_auth` (each OK/WARNING/DISABLED).
+- There is no `ota_signature` or `homespan_ota` check any more: the single-slot layout has
+  no over-the-air path, so both were removed with it.
 - No numeric security score is exposed (not on MQTT, not in the Web UI).
 
 ---
 
 ## 11. Firmware status audit
 
-- Source: `esp_app_get_description()->version` (e.g. `0.10.0-dev+<hash>`).
+- Source: `esp_app_get_description()->version` (e.g. `0.11.0-dev+<hash>`).
 - Exposed in `B/state.firmware_version` and `B/health.firmware_version`; mapped to
   the firmware sensor via `B/state`.
-- No update state and no OTA orchestration over MQTT; HA cannot trigger OTA
-  (OTA is HTTP/HomeSpan only).
+- No update state and no update orchestration over MQTT: the single-slot layout has no
+  over-the-air path at all, so there is nothing for Home Assistant to trigger.
 
 ---
 

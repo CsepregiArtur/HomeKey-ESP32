@@ -22,7 +22,7 @@ You are currently viewing the documentation for the **bleeding edge** (`main` br
 | Backup | — | **Encrypted + signed** household backup |
 | MQTT | Legacy topics | **+ household namespace** and HA discovery |
 | MQTT lock/unlock | Plain numeric payloads | **HMAC-SHA256 authenticated** |
-| Web UI | Misc, MQTT, OTA, Logs | **+ household, node, health, security, audit, backup, recovery, provision** |
+| Web UI | Misc, MQTT, OTA, Logs | **+ household, node, health, security, audit, backup, recovery, provision**; the OTA page is **removed** (no over-the-air update) |
 | **Flash encryption** | **Disabled** | **Supported** (currently off) |
 | **Secure Boot** | **Disabled** | **Supported** (currently off, V1 ECDSA-P256) |
 | **NVS encryption** | **Disabled** | **Supported** (currently off) |

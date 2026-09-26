@@ -5,6 +5,17 @@ Notable changes per release. User-facing detail lives in the docs:
 
 ## Unreleased
 
+### Removed
+
+* **Over-the-air firmware updates.** The device now uses a single-slot flash layout
+  (`no_ota.csv`): one `factory` application partition of 3840 KiB instead of two OTA slots of
+  1920 KiB, and no `otadata`. The application partition went from 3.3% free to 52% free, and
+  `nvs` grew from 24 KiB to 92 KiB. Removed with it: the `/ota/*` upload endpoint, the
+  "update from GitHub" routes, HomeSpan's OTA upload service, the OTA password, the browser
+  upload page, and the OTA signature-verification settings. **Firmware is installed over
+  serial only** - a partition table cannot be delivered over the air. See
+  [Single-slot layout](docs/content/SINGLE_SLOT_LAYOUT.md).
+
 ### Added
 
 * **Back up the keys, not just the configuration.** A backup can now carry this device's own

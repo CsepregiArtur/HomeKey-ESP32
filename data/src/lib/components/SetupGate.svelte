@@ -29,7 +29,6 @@
 	let webPassword = $state('');
 	let webPasswordConfirm = $state('');
 	let setupCode = $state('');
-	let otaPasswd = $state('');
 	let apPassword = $state('HomeKey$123$');
 
 	const weakCodes = new Set([
@@ -43,7 +42,7 @@
 		if (webPassword !== webPasswordConfirm) return 'The two Web UI passwords do not match.';
 		if (!/^\d{8}$/.test(setupCode)) return 'The HomeKit setup code must be exactly 8 digits.';
 		if (weakCodes.has(setupCode)) return 'That HomeKit setup code is too easy to guess.';
-		if (otaPasswd.length < 8) return 'The OTA password must be at least 8 characters.';
+
 		if (apPassword.length < 8) return 'The setup AP password must be at least 8 characters.';
 		return null;
 	}
@@ -65,7 +64,6 @@
 				webUsername: webUsername.trim(),
 				webPassword,
 				setupCode,
-				otaPasswd,
 				accessPointPassword: apPassword,
 				setupCompleted: true
 			} as any);
@@ -186,26 +184,6 @@
 						</div>
 						<p class="text-xs text-base-content/60">
 							This is the code you type into Apple Home. It is public until you change it.
-						</p>
-					</div>
-
-					<!-- OTA -->
-					<div class="space-y-3">
-						<h3 class="text-sm font-semibold">OTA password</h3>
-						<div class="form-control max-w-xs">
-							<label class="label" for="setup-ota">
-								<span class="label-text text-xs">min 8 characters</span>
-							</label>
-							<input
-								id="setup-ota"
-								type="password"
-								bind:value={otaPasswd}
-								autocomplete="new-password"
-								class="input input-sm input-bordered w-full"
-							/>
-						</div>
-						<p class="text-xs text-base-content/60">
-							HomeSpan OTA uploads stay disabled while this is the shipped default.
 						</p>
 					</div>
 

@@ -51,7 +51,7 @@ in [`docs/content/fork-vs-upstream.md`](docs/content/fork-vs-upstream.md).
 | Provisioning | — | Single-use, expiring, replay-protected join codes |
 | MQTT | Single-device legacy topics | **Additive** household namespace + HA discovery |
 | MQTT lock/unlock | Plain numeric payloads | **HMAC-SHA256 authenticated** commands |
-| Web UI | Misc, MQTT, OTA, Logs, Actions | **+ household, node, health, security, audit, backup, recovery, provision** |
+| Web UI | Misc, MQTT, OTA, Logs, Actions | **+ household, node, health, security, audit, backup, recovery, provision**; OTA page **removed** (no over-the-air update) |
 | Audit log | — | Bounded 256-record log |
 | **Flash encryption** | **Disabled** (deliberate) | **Supported** — currently off, AES-256 eFuse key when enabled |
 | **Secure Boot** | **Disabled** | **Supported** — currently off, V1 (ECDSA-P256) when enabled |
@@ -178,7 +178,7 @@ The following chips are supported for Ethernet:
    - Connect to the device's WiFi AP (`HK_XXXXXX`). The password is `HomeKey$123$` until you set your own on the setup screen.
    - Access the web interface at `http://192.168.4.1` - type the address, phones do not auto-open the portal
    - Configure your WiFi credentials, HomeKit setup code and Web UI login
-   - Open the device's Web UI on your network and finish the **first-run setup screen**: Web UI username + password, HomeKit Setup Code, OTA password and setup AP password. Until you save it the Web UI has **no login**, so only do this on a trusted network.
+   - Open the device's Web UI on your network and finish the **first-run setup screen**: Web UI username + password, HomeKit Setup Code and setup AP password. Until you save it the Web UI has **no login**, so only do this on a trusted network.
    - Pair with Apple Home using the Setup Code you chose (the shipped `466-37-726` applies until you set your own)
 
 > [!NOTE]
@@ -241,8 +241,8 @@ graph TD
 ### **Modern Web Interface**
 - **Svelte Frontend**: Responsive, modern UI built with Svelte 5 + Tailwind CSS
 - **Real-time Updates**: WebSocket-powered live status updates
-- **OTA Updates**: Over-the-air firmware updates via web interface
 - **Configuration Management**: Easy setup without recompiling
+- **Serial-only updates**: no over-the-air path by design, so nothing on the network can replace the firmware
 
 ### **Developer Friendly**
 - **Open Source**: MIT licensed, community-driven development
@@ -371,7 +371,7 @@ HomeKey-ESP32/
 | **HomeKit Bridge** | [`HomeKitLock.cpp`](main/HomeKitLock.cpp) | Manages Apple HomeKit integration and pairing |
 | **Lock Manager** | [`LockManager.cpp`](main/LockManager.cpp) | Controls lock state transitions and GPIO actions |
 | **MQTT Client** | [`MqttManager.cpp`](main/MqttManager.cpp) | Enables smart home integration via MQTT |
-| **Web Server** | [`WebServerManager.cpp`](main/WebServerManager.cpp) | Provides configuration UI and OTA updates |
+| **Web Server** | [`WebServerManager.cpp`](main/WebServerManager.cpp) | Provides the configuration UI and the Home Assistant direct API |
 | **Config Manager** | [`ConfigManager.cpp`](main/ConfigManager.cpp) | Handles persistent configuration storage |
 
 ### Building from Source

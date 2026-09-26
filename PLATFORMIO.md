@@ -3,9 +3,13 @@
 > [!NOTE]
 > **Fork differences.** This fork **supports** flash encryption, Secure Boot V1 and NVS
 > encryption, but they are **disabled by default** so the board stays fully reversible.
-> `platformio.ini`'s `board_build.partitions = with_ota.csv` therefore refers to the
-> plain upstream-compatible layout, and `pio run -t upload` writes a normal unsigned
-> application.
+> `platformio.ini`'s `board_build.partitions = no_ota.csv` therefore selects a
+> **single-slot** layout - one `factory` application partition of 3840 KiB, no `otadata`
+> and no second slot - and `pio run -t upload` writes a normal unsigned application over
+> serial.
+>
+> **There is no over-the-air firmware update any more.** See
+> [Single-slot layout](docs/content/SINGLE_SLOT_LAYOUT.md).
 >
 > If you execute the Path 2 rollout, the partition table moves to `0xD000` with an
 > added `nvs_keys` partition, and a device whose eFuses are already burned with a
@@ -19,7 +23,7 @@ monitoring this project with PlatformIO instead of `idf.py`.
 
 ```bash
 pio run                # build firmware (app + littlefs web UI image)
-pio run -t upload      # flash bootloader, partition table, otadata, littlefs, app
+pio run -t upload      # flash bootloader, partition table, littlefs, app (over serial)
 pio device monitor     # 115200 baud, UART0
 pio run -t erase       # erase the whole flash
 pio run -t menuconfig  # ESP-IDF menuconfig
@@ -45,7 +49,7 @@ Requirements:
 | Platform | `espressif32@6.13.0` | last platform pairing ESP-IDF 5.5.x with GCC 14.2 |
 | Framework | local ESP-IDF v5.5.5 | via `platform_packages`, see below |
 | Toolchain | local `xtensa-esp-elf` (`esp-14.2.0_20260121`) | the compiler ESP-IDF 5.5.5 expects, also via `platform_packages` |
-| Partition table | `with_ota.csv` | `board_build.partitions`, must match `sdkconfig.defaults` || sdkconfig | `sdkconfig.defaults`, `sdkconfig.defaults.esp32` | read by ESP-IDF itself |
+| Partition table | `no_ota.csv` | single-slot (no OTA); `board_build.partitions`, must match `sdkconfig.defaults` || sdkconfig | `sdkconfig.defaults`, `sdkconfig.defaults.esp32` | read by ESP-IDF itself |
 
 ### Why a local ESP-IDF
 
@@ -97,7 +101,7 @@ and pinned in `dependencies.lock` on the first build.
    `build/spiffs.bin`, identical to an `idf.py` build;
 2. appends that image to the esptool command line at the offset of the `spiffs`
    partition (taken from `board_build.partitions`), because PlatformIO only
-   flashes the bootloader, partition table, otadata and application by itself.
+   flashes the bootloader, partition table and application by itself.
 
 Result: `pio run -t upload` flashes the complete device in one command.
 

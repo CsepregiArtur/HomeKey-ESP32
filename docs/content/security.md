@@ -31,13 +31,12 @@ HomeKey-ESP32 controls a door lock, so it is worth being explicit about what it 
 
 These protections are active without any configuration:
 
-* **First-run setup in the Web UI.** The values compiled into `main/include/defaults.h` (Setup Code, setup AP password, OTA password, Web UI password) are published in this repository, so a factory-fresh device does **not** rely on them. It comes up with Web UI authentication **off** and presents a blocking **first-run setup** screen the first time you open the Web UI, where you choose your own:
+* **First-run setup in the Web UI.** The values compiled into `main/include/defaults.h` (Setup Code, setup AP password, Web UI password) are published in this repository, so a factory-fresh device does **not** rely on them. It comes up with Web UI authentication **off** and presents a blocking **first-run setup** screen the first time you open the Web UI, where you choose your own:
 
   | Credential | Notes |
   | --- | --- |
   | Web UI username + password | Required to reach the configuration UI afterwards (8 characters minimum) |
   | HomeKit Setup Code | 8 digits, no leading zero, no trivial patterns; handed to HomeSpan immediately |
-  | OTA password | Turns the HomeSpan OTA endpoint on |
   | Setup AP password | Used by the `HK_XXXXXX` setup network |
 
   Until that screen is submitted the Web UI has **no login**, so keep a fresh device on a trusted network. Saving it sets `setupCompleted`, turns `webAuthEnabled` on and reloads the page, which then asks for the credentials you just chose.
@@ -48,7 +47,7 @@ These protections are active without any configuration:
 
 * **Secrets are never sent to the browser.** Configuration reads return `********` for every `*Password`/`*Passwd` field, and the write path refuses to store that placeholder, so a stale form cannot overwrite a real password with the mask.
 
-* **The HomeSpan OTA service stays off until you set an OTA password.** Its only protection is that password, and the shipped value (`homespan-ota`) is public, so the service is skipped while the password is empty or unchanged. The fix is one line of configuration: set any password under `Web UI → Misc → HomeSpan → OTA Password` and save - the device reboots and `espota` accepts that password. The Web UI OTA uploader (`/ota/*`) is unaffected.
+* **There is no over-the-air update path at all.** The single-slot flash layout has one application partition and no OTA data partition, so no image can be written over the network and there is no second slot to switch to afterwards. HomeSpan's OTA service is never enabled, the OTA password is gone, and the `/ota/*` upload endpoints and the "update from GitHub" routes do not exist. **That removes a whole class of risk: nothing reachable over the network can replace this device's firmware - signed or not.** Firmware and the web UI image are installed over serial; see [Single-slot layout](SINGLE_SLOT_LAYOUT).
 
 * **The setup access point password is the documented default until you change it.** Two APs can appear while a device has no network: the project's own `HK_XXXXXX` captive portal and HomeSpan's `HomeSpan-Setup`. Both use the setup AP password so they cannot be opened with two different published values. On a device that has not been through first-run setup that value is `HomeKey$123$`, so **set your own on the setup screen** - the AP only exists before the device is provisioned, but it is still a way in while it is up.
 
@@ -93,7 +92,13 @@ The lock subscribes to command topics such as `homekit/set_target_state` and `ho
 
 Put the lock on an IoT SSID or VLAN that cannot reach your computers, and block client-to-client traffic if your AP supports it. The device speaks plain HTTP on the local network by default, so a segmented network is what keeps that acceptable.
 
-### Verify OTA images
+### Verify OTA images — no longer applies
+
+> [!NOTE]
+> Kept for history. The current layout has no over-the-air update path, so there is no
+> image to verify: `CONFIG_SECURE_SIGNED_APPS_NO_SECURE_BOOT` and its siblings are off in
+> `sdkconfig.defaults`, the security posture no longer reports an `ota_signature` finding,
+> and a serial flash was never covered by them in the first place.
 
 **A build from the committed `sdkconfig.defaults` verifies nothing.** That default is "Path 1"
 - nothing enabled, no eFuses burned, plaintext flashing keeps working - so app images are

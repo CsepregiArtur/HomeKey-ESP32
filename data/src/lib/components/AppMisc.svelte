@@ -476,18 +476,6 @@
 							<!-- HomeSpan -->
 							<div class="py-2 px-3 bg-base-100 rounded-lg">
 								<p class="text-sm font-medium mb-2">HomeSpan - <a class="text-xs text-base-content/60 underline mb-2" href="https://github.com/HomeSpan/HomeSpan/blob/master/docs/UserGuide.md#device-configuration-mode">User Guide</a></p>
-								<div class="form-control mb-2">
-									<!-- svelte-ignore a11y_label_has_associated_control -->
-									<label class="label">
-										<span class="label-text text-xs">OTA Password</span>
-									</label>
-									<input
-										type="password"
-										bind:value={miscConfig.otaPasswd}
-										placeholder="Set a custom password to enable OTA"
-										class="input input-sm input-bordered w-full"
-									/>
-								</div>
 								<div class="grid grid-cols-2 gap-2">
 									<div class="form-control">
 										<!-- svelte-ignore a11y_label_has_associated_control -->

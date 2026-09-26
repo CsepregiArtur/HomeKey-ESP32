@@ -12,9 +12,9 @@ The Web UI password is required once `webAuthEnabled` is on, which first-run set
 
 If you never changed the setup AP password from the shipped value, it is `HomeKey$123$`. If you do not know it, erase NVS over USB (`pio run -t erase` or `esptool.py erase_flash`) - the device returns to a factory-fresh state and shows the first-run setup screen again - then re-pair it. Erasing NVS also removes Wi-Fi credentials, the HomeKit pairing and every HomeKey enrolment.
 
-## HomeSpan `espota` uploads are rejected or time out
+## Over-the-air uploads are refused
 
-The `espota` service is disabled while the OTA password is unset or still the shipped default (`homespan-ota`). Set your own password under `Misc → HomeSpan` and reboot; the boot log reports whether the service was started. The Web UI OTA uploader works regardless, and is protected by the Web UI authentication setting.
+There is no OTA path. The single-slot layout has no second application slot and no `otadata`, so `espota`, the Web UI uploader and the GitHub updater are all gone. Install firmware over serial (`idf.py -p <port> flash` or `pio run -t upload`). See [Single-slot layout](SINGLE_SLOT_LAYOUT).
 
 ## Requests are rejected with 401 even though the password is correct
 
@@ -22,10 +22,7 @@ The Web UI rejects requests whose `Host` header does not name the device (this b
 
 ## `espota.py` - "No response from Device" or "No response from the ESP"
 
-`espota.py` starts by listening on a random port between 10000-60000(definable through option `-P`) and then sends an invitation for connection to the ESP32 on the port 3232.
-This means that not only your PC has to be able to reach the ESP32 but it also has to work the other way around.
-
-Make sure your network configuration allows for a connection between the ESP32 and the PC to be established. Host IP and Port can be defined using the `-I` and `-P` options respectively.
+`espota.py` is not applicable to this firmware: it uploads over the air, and there is no OTA path on the single-slot layout. Use a serial flash. If you are reading this while debugging an older build, the usual cause is that the PC and the ESP32 cannot reach each other on the invitation port (3232) or the listening port (10000-60000, `-P`).
 
 ## HomeKey not working on Apple Watch
 

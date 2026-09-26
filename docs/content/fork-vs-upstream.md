@@ -29,12 +29,12 @@ functionality. Everything below explains **only what this fork changes**.
 | Provisioning | — | Single-use, expiring, replay-protected join codes |
 | MQTT | Single-device legacy topics | **Additive** structured household namespace + HA discovery |
 | MQTT commands | Plain numeric payloads | **HMAC-SHA256 authenticated** `command/lock` \| `command/unlock` |
-| Web UI pages | Misc, MQTT, OTA, Logs, Actions… | **+ household, node, health, security, audit, backup, recovery, provision** |
+| Web UI pages | Misc, MQTT, OTA, Logs, Actions… | **+ household, node, health, security, audit, backup, recovery, provision**; the OTA page is **removed** (no over-the-air update) |
 | Flash encryption | Disabled (deliberate) | **Implemented, off by default** |
 | Secure Boot | Disabled | **Implemented, off by default** (V1, ECDSA-P256 when enabled) |
 | NVS encryption | Disabled | **Implemented, off by default** (`nvs_keys` partition when enabled) |
-| Partition table | `0x8000`, no `nvs_keys` | **Same as upstream by default**; moves to `0xD000` with `nvs_keys` when hardening is enabled |
-| OTA sources | ArduinoOTA / HomeSpan / Web UI | Same, **plus Secure Boot signing required once the hardening is enabled** |
+| Partition table | `0x8000`, no `nvs_keys` | Single-slot `no_ota.csv`: one 3840 KiB `factory` app slot, no `otadata`; moves to `0xD000` with `nvs_keys` when hardening is enabled |
+| OTA sources | ArduinoOTA / HomeSpan / Web UI | **None** — the single-slot layout has nowhere to write an image; firmware is installed over serial |
 | Audit log | — | Bounded 256-record NVS-backed log |
 | Health reporting | — | Aggregated health snapshot |
 
@@ -133,9 +133,10 @@ before touching any security config.
 
 When Path 2 is executed, be aware that:
 
-- **OTA from upstream/older builds will not boot.** The partition table moves
-  (`0x8000` → `0xD000`), an `nvs_keys` partition is added, and app partitions are
-  realigned to 64 KiB boundaries. A **serial flash is required**.
+- **Firmware from an older build cannot be installed by any route but serial.** The partition
+  table moves (`0x8000` → `0xD000`), an `nvs_keys` partition is added, and app partitions are
+  realigned to 64 KiB boundaries. A **serial flash is required** (and there is no OTA path on
+  the current single-slot layout in any case).
 - **Existing device data is erased** when the flash is first encrypted: Wi-Fi
   credentials, HomeKit pairing and HomeKey reader enrolment.
 - Every future image must be signed with the same key. Generate it once and keep it
@@ -152,8 +153,8 @@ To be explicit, this fork does **not** touch:
   storage/serialization around it.
 - `LockManager` lock logic — still the single source of truth for lock state.
 - The HomeSpan / HomeKit accessory model.
-- The existing Web UI pages (Misc, MQTT, OTA, Logs, Actions) — only new pages were
-  added.
+- The existing Web UI pages (Misc, MQTT, Logs, Actions) — only new pages were
+  added, and the OTA page was removed along with over-the-air updates.
 - The existing MQTT topic names and payloads — the household namespace is additive.
 - Backup cryptography is new, so there is no upstream behaviour to preserve.
 

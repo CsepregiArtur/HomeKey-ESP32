@@ -193,7 +193,6 @@ namespace espConfig
   struct misc_config_t
   {
     std::string deviceName = DEVICE_NAME;
-    std::string otaPasswd = OTA_PWD;
     uint8_t hk_key_color = HOMEKEY_COLOR;
     std::string setupCode = SETUP_CODE;
     bool lockAlwaysUnlock = HOMEKEY_ALWAYS_UNLOCK;
@@ -210,7 +209,7 @@ namespace espConfig
     // A freshly flashed device keeps webAuthEnabled=false and this false, so the UI is
     // reachable (on the local network only) long enough to present a blocking onboarding
     // screen. That screen is where every secret gets chosen deliberately: Web UI
-    // password, HomeKit setup code, OTA password and setup AP password. This avoids both
+    // password, HomeKit setup code and setup AP password. This avoids both
     // shipping known placeholder credentials and randomising secrets the user never gets
     // a chance to read. See securityInit() in main.cpp and docs/content/security.md.
     bool setupCompleted = false;

@@ -8,8 +8,9 @@ weight: 3
 > [!NOTE]
 > **Fork differences in the Web UI.** Upstream ships the Misc, MQTT, OTA, Logs and
 > Actions pages. This fork **adds** *household*, *node*, *health*, *security*,
-> *audit*, *backup*, *recovery* and *provision*. The existing pages are unchanged, and
-> the default security posture matches upstream (flash encryption off). See
+> *audit*, *backup*, *recovery* and *provision*, and **removes** the OTA page: there is
+> no over-the-air update any more. The remaining pages are unchanged, and the default
+> security posture matches upstream (flash encryption off). See
 > [Fork vs Upstream](fork-vs-upstream).
 
 Welcome to the control center of your HomeKey-ESP32! This guide will walk you through all the settings you can tweak to make your device work exactly how you want it to. All these configurations are easily managed through the device's intuitive web interface.
@@ -33,7 +34,7 @@ After you've successfully flashed the firmware and completed the initial setup (
 
 The web interface is built using a lightweight Svelte 5 single-page architecture (utilizing `sv-router` / `svelte-router` for client-side navigation instead of a full framework overhead).
 
-The web interface is organized into several main sections: **Info**, **MQTT**, **Actions**, **System**, **OTA Update**, and **Logs**.
+The web interface is organized into several main sections: **Info**, **MQTT**, **Actions**, **System**, and **Logs**.
 
 ---
 
@@ -170,7 +171,6 @@ Configure GPIO pin allocations for the NFC reader, Ethernet, and HomeSpan status
     > When sharing an SPI bus between PN532/PN7161 and SPI Ethernet, ensure the SCK, MISO, and MOSI pins match.
 
 #### 5.2.4. HomeSpan Settings
-*   **OTA Password:** Password for HomeSpan command-line OTA updates. The `espota` service stays disabled while this is empty or still the shipped default (`homespan-ota`), because that value is public - set any password here to enable it. The Web UI firmware uploader does not use it. See [Security]({{< ref "security" >}}).
 *   **Control GPIO Pin:** Optional physical pairing/reset button pin (set to `255` if unused).
 *   **Status LED GPIO Pin:** Optional HomeSpan status indicator LED pin (set to `255` if unused).
 
@@ -199,13 +199,7 @@ Configure WebUI authentication, HTTPS SSL/TLS encryption, and certificates.
 
 ---
 
-## 6. OTA Update
-
-Upload pre-compiled application binaries (`*.firmware.bin`) or web filesystem images (`littlefs.bin`) for seamless Over-The-Air upgrades.
-
----
-
-## 7. Logs & Diagnostics
+## 6. Logs & Diagnostics
 
 *   **Live Log Streaming:** Real-time log streaming using `@tanstack/svelte-virtual`.
 *   **Log Level Filtering:** Toggle between `ERROR`, `WARN`, `INFO`, `DEBUG`, and `VERBOSE` log levels.

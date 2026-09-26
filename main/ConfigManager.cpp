@@ -86,7 +86,6 @@ ConfigManager::ConfigManager() : m_isInitialized(false) {
     {"misc",{
       // Miscellaneous Config
       {"deviceName", &m_miscConfig.deviceName},
-      {"otaPasswd", &m_miscConfig.otaPasswd},
       {"hk_key_color", &m_miscConfig.hk_key_color},
       {"setupCode", &m_miscConfig.setupCode},
       {"lockAlwaysUnlock", &m_miscConfig.lockAlwaysUnlock},

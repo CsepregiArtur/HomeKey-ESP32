@@ -26,7 +26,11 @@ public:
         NODE_REVOCATION = 10,
         BACKUP_CREATED = 11,
         BACKUP_RESTORED = 12,
-        OTA_UPDATE = 13,
+        // 13 was OTA_UPDATE. The value is retired rather than reused: audit records are
+        // persisted as raw packed bytes in NVS, so a number may not change meaning
+        // retroactively. Rows written before OTA was removed still decode, and the next
+        // new event type takes 15 rather than 13.
+        RETIRED_OTA_UPDATE = 13,
         SECURITY_CONFIG_CHANGE = 14,
         MAX_EVENT
     };

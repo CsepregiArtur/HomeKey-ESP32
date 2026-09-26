@@ -81,15 +81,14 @@ bool pollHS = false;
 /**
  * @brief Handle first-run credential setup and report any shipped defaults still in use.
  *
- * Every default this firmware ships with (HomeKit Setup Code, setup AP password, OTA
- * password and Web UI credentials) is published in the source repository, so a device
- * that keeps them can be paired with, reconfigured or reflashed by anybody who can
- * reach it over the network.
+ * Every default this firmware ships with (HomeKit Setup Code, setup AP password and Web UI
+ * credentials) is published in the source repository, so a device that keeps them can be
+ * paired with, reconfigured or reflashed by anybody who can reach it over the network.
  *
  * Nothing is generated here. A freshly flashed device comes up with the shipped
  * placeholders, Web UI authentication off and `setupCompleted` false, and the Web UI
  * shows a blocking onboarding screen where the user chooses every secret deliberately:
- * Web UI password, HomeKit setup code, OTA password and setup AP password. Submitting
+ * Web UI password, HomeKit setup code and setup AP password. Submitting
  * that screen sets `setupCompleted`, after which this function only reports anything
  * still left on a shipped default.
  *
@@ -134,10 +133,6 @@ static void securityInit() {
 
   // Fully configured device: report anything that is still on a shipped default
   // instead of changing it behind the user's back.
-  if (misc.otaPasswd.empty() || misc.otaPasswd == OTA_PWD) {
-    ESP_LOGW(TAG, "HomeSpan OTA is disabled while the OTA password is the shipped default. "
-                  "Set your own under Misc -> HomeSpan to enable it.");
-  }
   if (misc.accessPointPassword == AP_PASSWORD) {
     ESP_LOGW(TAG, "The setup access point still uses the password published in the source "
                   "repository. Change it in the setup portal or under Misc -> Security.");
@@ -151,11 +146,6 @@ static void securityInit() {
                   "network can read its configuration, reset the pairing and flash firmware. "
                   "Enable a username/password under Misc -> Security.");
   }
-#if CONFIG_SECURE_SIGNED_APPS_NO_SECURE_BOOT
-  ESP_LOGI(TAG, "OTA images are signature verified (signed apps, no secure boot).");
-#else
-  ESP_LOGI(TAG, "OTA images are not signature verified; see docs/content/security.md to enable it.");
-#endif
 }
 
 static void dhcp_set_captiveportal_url(void) {
