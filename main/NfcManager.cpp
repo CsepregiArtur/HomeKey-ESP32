@@ -683,7 +683,19 @@ void NfcManager::handleGuestWrite(const guest::GuestTagRecord &rec,
 
     ntag::Info info{};
     if (!ntag::identify(*m_reader, info)) {
-        fail("Not an ISO14443A Type 2 tag (use NTAG213/215/216)");
+        // A 4-byte UID is the giveaway for MIFARE Classic, whose READ needs sector
+        // authentication that this firmware does not do. Naming the card is far more
+        // useful than "not a Type 2 tag", because that is what the user has to act on.
+        const std::string msg =
+            uid.size() == 4
+                ? fmt::format("This card is not an NTAG/Type 2 tag. Its {}-byte UID "
+                              "normally means MIFARE Classic, which cannot be used. "
+                              "Use an NTAG213/215/216 (7-byte UID).",
+                              uid.size())
+                : fmt::format("Not an ISO14443A Type 2 tag ({} has a {}-byte UID; use "
+                              "NTAG213/215/216)",
+                              ntag::familyToString(info.family), uid.size());
+        fail(msg);
         return;
     }
     if (info.userBytes < guest::kCardPayloadLen) {

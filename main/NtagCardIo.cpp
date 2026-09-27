@@ -22,6 +22,23 @@ bool readFourPages(INfcReader &reader, uint16_t page, uint8_t out[16], uint32_t 
     const std::vector<uint8_t> cmd = {kCmdRead, static_cast<uint8_t>(page & 0xFF)};
     std::vector<uint8_t> resp;
     if (!reader.transceiveRaw(cmd, resp, timeoutMs)) {
+        ESP_LOGW(TAG, "READ page %u was not answered at all (no response frame).",
+                 static_cast<unsigned>(page));
+        return false;
+    }
+    if (resp.empty()) {
+        // The frame came back but carried no data: the tag refused the command. For a
+        // MIFARE Classic that is expected - its READ only works after sector
+        // authentication, which this firmware deliberately does not implement - and it
+        // is by far the most common reason a card cannot be taught. Saying so here saves
+        // the user from guessing, because the caller's message alone cannot tell this
+        // apart from a card that really is not a Type 2 tag.
+        ESP_LOGW(TAG,
+                 "READ page %u was refused (0 bytes of data). A MIFARE Classic refuses "
+                 "the Type 2 READ until its sector is authenticated, so a 4-byte UID "
+                 "card is normally a Classic and cannot be used; NTAG213/215/216 have "
+                 "7-byte UIDs.",
+                 static_cast<unsigned>(page));
         return false;
     }
     if (resp.size() < 16) {

@@ -3356,6 +3356,16 @@ esp_err_t WebServerManager::handleHaGuestConfig(httpd_req_t *req) {
       return sendJsonError(req, "Could not store the guest access flag",
                            "507 Insufficient Storage");
     }
+    // Audited here as well as on the MQTT path. This is the authenticated route the
+    // Home Assistant integration uses, so leaving it unaudited would mean the stricter
+    // path was the one with no record - which is backwards.
+    if (instance->m_auditManager && instance->m_nodeIdentityManager) {
+      instance->m_auditManager->record(
+          AuditManager::SECURITY_CONFIG_CHANGE, AuditManager::SOURCE_WEB,
+          AuditManager::RESULT_SUCCESS,
+          instance->m_nodeIdentityManager->info().node_id,
+          cJSON_IsTrue(enabled) ? "guest_enabled" : "guest_disabled");
+    }
     changed = true;
   }
   const cJSON *validity = cJSON_GetObjectItemCaseSensitive(root, "default_validity_seconds");
@@ -3364,6 +3374,13 @@ esp_err_t WebServerManager::handleHaGuestConfig(httpd_req_t *req) {
             static_cast<uint32_t>(validity->valuedouble))) {
       return sendJsonError(req, "Could not store the default validity",
                            "507 Insufficient Storage");
+    }
+    if (instance->m_auditManager && instance->m_nodeIdentityManager) {
+      instance->m_auditManager->record(
+          AuditManager::SECURITY_CONFIG_CHANGE, AuditManager::SOURCE_WEB,
+          AuditManager::RESULT_SUCCESS,
+          instance->m_nodeIdentityManager->info().node_id,
+          fmt::format("guest_validity={}s", static_cast<uint32_t>(validity->valuedouble)));
     }
     changed = true;
   }
