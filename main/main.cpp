@@ -37,6 +37,7 @@
 #include "SecurityManager.hpp"
 #include "AuditManager.hpp"
 #include "HealthManager.hpp"
+#include "GuestTagManager.hpp"
 #include "BackupManager.hpp"
 #include "RestoreManager.hpp"
 #include "eventStructs.hpp"
@@ -61,6 +62,9 @@ std::unique_ptr<ProvisioningManager> provisioningManager;
 std::unique_ptr<SecurityManager> securityManager;
 std::unique_ptr<AuditManager> auditManager;
 std::unique_ptr<HealthManager> healthManager;
+// Guest NFC tags (locally verified card credentials). Constructed before NfcManager,
+// which holds a reference to it.
+std::unique_ptr<GuestTagManager> guestTagManager;
 std::unique_ptr<BackupManager> backupManager;
 std::unique_ptr<RestoreManager> restoreManager;
 
@@ -323,6 +327,18 @@ static void setupAuditHooks() {
                            AuditManager::SOURCE_NFC,
                            s.status ? AuditManager::RESULT_SUCCESS : AuditManager::RESULT_FAILURE,
                            nodeId);
+    } else if (nfc_event.type == GUEST_TAP) {
+      // Same treatment as HomeKey: a guest card is an access credential, so both
+      // the accepted and refused cases belong in the audit log. The reason is
+      // recorded so "expired" is distinguishable from "wrong card".
+      EventGuestTap g = alpaca::deserialize<EventGuestTap>(nfc_event.data, ec);
+      if (ec) return;
+      auditManager->record(g.status ? AuditManager::GUEST_AUTH_SUCCESS
+                                    : AuditManager::GUEST_AUTH_FAILURE,
+                           AuditManager::SOURCE_NFC,
+                           g.status ? AuditManager::RESULT_SUCCESS : AuditManager::RESULT_FAILURE,
+                           nodeId, guest::verifyResultToString(
+                                       static_cast<guest::VerifyResult>(g.reason)));
     }
   });
   s_auditLockSub = AppEventLoop::subscribe(LOCK_EVENT, LOCK_STATE_CHANGED, [nodeId](const uint8_t *data, size_t size) {
@@ -445,6 +461,8 @@ void setup() {
   provisioningManager->begin();
   auditManager = std::make_unique<AuditManager>();
   auditManager->begin();
+  guestTagManager = std::make_unique<GuestTagManager>();
+  guestTagManager->begin();
   securityManager = std::make_unique<SecurityManager>(configManager);
   healthManager = std::make_unique<HealthManager>();
   healthManager->begin();
@@ -486,6 +504,7 @@ void setup() {
   readerDataManager.begin();
 
   nfcManager = std::make_unique<NfcManager>(readerDataManager,
+                              *guestTagManager,
                               activeNfcPins,
                               miscConfig.nfcReaderType,
                               miscConfig.nfcIrqPin,
@@ -495,6 +514,7 @@ void setup() {
   nfcManager->begin();
 
   webServerManager.setNfcManager(nfcManager.get());
+  webServerManager.setGuestTagManager(guestTagManager.get());
   webServerManager.setMqttManager(mqttManager.get());
   webServerManager.setHouseholdManager(householdManager.get());
   webServerManager.setNodeIdentityManager(nodeIdentityManager.get());
@@ -508,6 +528,7 @@ void setup() {
   mqttManager->setNodeIdentityManager(nodeIdentityManager.get());
   mqttManager->setHealthManager(healthManager.get());
   mqttManager->setAuditManager(auditManager.get());
+  mqttManager->setGuestTagManager(guestTagManager.get());
   // Lets the household last_auth topic report the name a user gave a paired controller.
   mqttManager->setReaderDataManager(&readerDataManager);
 

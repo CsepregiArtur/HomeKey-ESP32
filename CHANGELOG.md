@@ -18,6 +18,22 @@ Notable changes per release. User-facing detail lives in the docs:
 
 ### Added
 
+* **Guest NFC tags - temporary access for people without an Apple device.** Teach an
+  ordinary NTAG213/215/216 card on a node with a PN532 reader and it unlocks exactly like a
+  HomeKey tap: verified and driven **locally**, with no MQTT, Home Assistant or internet
+  involved in the tap itself. Each tag has an optional validity window, can be revoked, and
+  is distributed across the household so every node verifies the same card offline.
+  Configured from Home Assistant over `/api/ha/guest/*` (TLS + device credential) or over
+  MQTT; discovery publishes *Guest access* and *Guest tags* sensors.
+  * The card holds an XChaCha20-Poly1305 payload keyed by a random per-tag token and bound to
+    the card's UID, so it cannot be forged and a payload moved to a different card is refused.
+  * **A guest tag is not a HomeKey credential and cannot become one** - HomeKey is signed with
+    Apple-issued keys in a secure element. NTAG memory is static, so a person who reads the
+    card with any reader can clone it. Guest tags are convenience, not security; use HomeKey
+    for anything you rely on. The design and its limits, plus the NTAG 424 DNA upgrade path,
+    are written up in [Guest NFC tags](docs/content/guest-tags.md).
+  * Off by default, 16 tags per node, omitted from backups (tokens are per-node state).
+
 * **Back up the keys, not just the configuration.** A backup can now carry this device's own
   credentials - the reader credential store (its identity plus the enrolled issuers' endpoint
   keys) and the HomeKit pairing state - so a replacement node comes back as *the same device*:

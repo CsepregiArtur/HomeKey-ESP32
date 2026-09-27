@@ -25,6 +25,7 @@ class ProvisioningManager;
 class BackupManager;
 class RestoreManager;
 class LockManager;
+class GuestTagManager;
 namespace loggable {
 class WebSocketLogSinker;
 }
@@ -86,6 +87,7 @@ public:
   void setProvisioningManager(ProvisioningManager *p) { m_provisioningManager = p; }
   void setBackupManager(BackupManager *b) { m_backupManager = b; }
   void setRestoreManager(RestoreManager *r) { m_restoreManager = r; }
+  void setGuestTagManager(GuestTagManager *g) { m_guestTagManager = g; }
   void broadcastWs(const uint8_t *payload, size_t len, httpd_ws_type_t type);
   void setWSBackLogSize(const uint16_t size);
 
@@ -177,6 +179,11 @@ private:
   static esp_err_t handleHaState(httpd_req_t *req);
   static esp_err_t handleHaConfig(httpd_req_t *req);
   static esp_err_t handleHaLock(httpd_req_t *req);
+  static esp_err_t handleHaGuest(httpd_req_t *req);
+  static esp_err_t handleHaGuestConfig(httpd_req_t *req);
+  static esp_err_t handleHaGuestTeach(httpd_req_t *req);
+  static esp_err_t handleHaGuestRevoke(httpd_req_t *req);
+  static esp_err_t handleHaGuestCancel(httpd_req_t *req);
 
   /**
    * @brief Refuse an API call when the transport is not encrypted.
@@ -285,6 +292,7 @@ private:
   NvsCredentialStore &m_readerDataManager;
   MqttManager *m_mqttManager;
   NfcManager *m_nfcManager;
+  GuestTagManager *m_guestTagManager = nullptr;
 
   // WebSocket infrastructure
   QueueHandle_t m_wsQueue;

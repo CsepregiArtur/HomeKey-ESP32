@@ -47,6 +47,14 @@ public:
     bool exchangeApdu(const std::vector<uint8_t>& send,
                       std::vector<uint8_t>& recv,
                       uint32_t timeoutMs) override;
+    // The NCI driver here is APDU-oriented and does not expose raw Type 2 frames.
+    // Guest tags can still be read and verified on this backend; only *teaching*
+    // a new card is unavailable.
+    bool transceiveRaw(const std::vector<uint8_t>&, std::vector<uint8_t>&,
+                       uint32_t) override {
+        return false;
+    }
+    bool supportsCardWrite() const override { return false; }
     bool healthCheck() override;
     
 private:

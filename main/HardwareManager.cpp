@@ -200,6 +200,18 @@ void HardwareManager::begin() {
         }
       }
       break;
+      case GUEST_TAP: {
+        // A guest card is an access credential, so its feedback matches a HomeKey
+        // tap rather than the neutral "tag seen" feedback.
+        EventGuestTap g = alpaca::deserialize<EventGuestTap>(nfc_event.data, ec);
+        if(!ec){
+          if(g.status) {showSuccessFeedback();triggerAltAction();} else showFailureFeedback();
+        } else {
+          ESP_LOGE(TAG, "Failed to deserialize Guest event: %s", ec.message().c_str());
+          return;
+        }
+      }
+      break;
       default:
       break;
     }

@@ -50,6 +50,27 @@ struct EventTagTap {
   uint8_t sak;
 };
 
+/**
+ * Result of a guest-card tap. `status` is the only field the lock path needs;
+ * `reason` and `label` exist so the audit log and MQTT can say *why* a card was
+ * refused (expired, disabled, ...) without re-deriving it.
+ */
+struct EventGuestTap {
+  bool status;
+  uint8_t reason;          ///< guest::VerifyResult
+  std::string tagId;       ///< 8 hex chars, empty when no record matched
+  std::string label;       ///< guest name, empty when unknown
+  uint32_t validUntil;     ///< 0 = no expiry
+};
+
+/** Outcome of teaching a card, published once the write has been verified. */
+struct EventGuestWriteResult {
+  bool success;
+  std::string tagId;
+  std::string label;
+  std::string message;     ///< bounded, safe text only
+};
+
 struct EventValueChanged {
   std::string name = "";
   uint8_t oldValue = 255;
@@ -60,6 +81,7 @@ struct EventValueChanged {
 enum NfcEventType : uint8_t {
     HOMEKEY_TAP,
     TAG_TAP,
+    GUEST_TAP,
     UPDATE_ECP,
     FORCE_AUTH_FLOW
 };

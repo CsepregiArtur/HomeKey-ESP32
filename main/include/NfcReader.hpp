@@ -97,6 +97,30 @@ public:
                               uint32_t timeoutMs) = 0;
 
     /**
+     * @brief Exchange a raw (non-APDU) frame with the currently selected target.
+     *
+     * ISO14443A Type 2 tags (NTAG / MIFARE Ultralight) are not ISO-DEP, so their
+     * READ/WRITE commands cannot be carried as APDUs. Readers whose driver has no
+     * raw path return false here and report supportsCardWrite() == false.
+     *
+     * @param send    Raw command bytes (e.g. {0x30, page} for a Type 2 READ).
+     * @param recv    Payload after any driver-framing/status bytes.
+     * @param timeoutMs  Transaction timeout.
+     * @return true when the frame was exchanged (not a guarantee the tag accepted it).
+     */
+    virtual bool transceiveRaw(const std::vector<uint8_t>& send,
+                               std::vector<uint8_t>& recv,
+                               uint32_t timeoutMs) = 0;
+
+    /**
+     * @brief Whether this backend can read/write raw tag memory.
+     *
+     * False means guest tags can still be *read* and verified on this reader, but
+     * new cards cannot be taught from this device.
+     */
+    virtual bool supportsCardWrite() const = 0;
+
+    /**
      * @brief Perform a lightweight health check (e.g. register write/read).
      * @return true if the reader is responsive.
      */

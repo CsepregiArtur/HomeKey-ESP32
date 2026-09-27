@@ -4,6 +4,7 @@ idf_component_register(SRCS "main.cpp" "app_events.cpp" "app_event_loop.cpp" "Co
                     "ConsoleLogSinker.cpp" "GPIOAllocator.cpp" "EthernetDriver.cpp"
                     "HouseholdManager.cpp" "NodeIdentityManager.cpp" "ProvisioningManager.cpp"
                     "SecurityManager.cpp" "AuditManager.cpp" "HealthManager.cpp"
+                    "GuestTagManager.cpp" "NtagCardIo.cpp"
                     "BackupManager.cpp" "RestoreManager.cpp" "DeviceCert.cpp"
                     "DiscoveryAdvertiser.cpp" "OTARollbackCompat.cpp"
                     INCLUDE_DIRS "include"

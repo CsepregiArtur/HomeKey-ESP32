@@ -76,6 +76,15 @@ enum {
     HEALTH_UPDATED,
 };
 
+// Guest NFC tags: a locally verified credential written onto an ordinary
+// ISO14443A card so guests can unlock without an Apple device. No HomeKey, no
+// MQTT and no internet are involved in a tap -- only in teaching/distribution.
+ESP_EVENT_DECLARE_BASE(GUEST_EVENT);
+enum {
+    GUEST_STATE_CHANGED,  ///< enable flag, default validity or the tag table changed
+    GUEST_WRITE_RESULT,   ///< a teach attempt on a card finished (success or not)
+};
+
 ESP_EVENT_DECLARE_BASE(PROVISION_EVENT);
 enum {
     PROVISION_CODE_ISSUED,

@@ -32,6 +32,10 @@ public:
         // new event type takes 15 rather than 13.
         RETIRED_OTA_UPDATE = 13,
         SECURITY_CONFIG_CHANGE = 14,
+        // Guest tags are a separate, locally verified credential. Appended (not
+        // inserted) so persisted records keep decoding: see the note above.
+        GUEST_AUTH_SUCCESS = 15,
+        GUEST_AUTH_FAILURE = 16,
         MAX_EVENT
     };
 

@@ -2,6 +2,8 @@
 #include "config.hpp"
 #include "MqttManager.hpp"
 #include "json_escape.hpp"
+#include "GuestTagManager.hpp"
+#include "guest_types.hpp"
 #include "LockManager.hpp"
 #include "ConfigManager.hpp"
 #include "JsonGuard.hpp"
@@ -152,10 +154,33 @@ bool MqttManager::begin(std::string deviceID) {
           }
         }
         break;
+        case GUEST_TAP: {
+          EventGuestTap g = alpaca::deserialize<EventGuestTap>(nfc_event.data, ec);
+          if(!ec){
+            publishGuestTap(g.tagId, g.label, g.status, g.reason);
+            // Same "who authenticated" channel as HomeKey, with a distinct type so
+            // automations can tell a guest card from an Apple device.
+            publishLastAuth("Guest", g.status ? "SUCCESS" : "FAILURE", g.label);
+          } else {
+            ESP_LOGE(TAG, "Failed to deserialize Guest event: %s", ec.message().c_str());
+            return;
+          }
+        }
+        break;
         default:
           break;
       }
     });
+
+    // Local guest-table changes are re-published so Home Assistant sees them and the
+    // other household nodes pick them up. Imports do not fire this event, so the
+    // table cannot bounce between nodes.
+    m_guest_state_changed =
+        AppEventLoop::subscribe(GUEST_EVENT, GUEST_STATE_CHANGED, [&](const uint8_t*, size_t) {
+            publishGuestStatus();
+            publishGuestTable();
+        });
+
     this->deviceID = deviceID;
 
     esp_mqtt_client_config_t mqtt_cfg = {};
@@ -392,7 +417,21 @@ void MqttManager::onConnected() {
         if (ret < 0) ESP_LOGW(TAG, "Failed to subscribe to command/lock");
         ret = esp_mqtt_client_subscribe(m_client, cmdUnlock.c_str(), 1);
         if (ret < 0) ESP_LOGW(TAG, "Failed to subscribe to command/unlock");
+        // Guest table distribution between household nodes.
+        const std::string guestTable = base + "/guest/table";
+        ret = esp_mqtt_client_subscribe(m_client, guestTable.c_str(), 1);
+        if (ret < 0) ESP_LOGW(TAG, "Failed to subscribe to guest/table");
     }
+
+    // Plain guest configuration topics. As (un)protected as the legacy lock topics
+    // subscribed above -- broker access is the boundary. The authenticated path is
+    // the /api/ha/guest/* HTTP API.
+    const std::string guestEnable = m_mqttConfig.mqttClientId + "/guest/set_enabled";
+    ret = esp_mqtt_client_subscribe(m_client, guestEnable.c_str(), 0);
+    if (ret < 0) ESP_LOGW(TAG, "Failed to subscribe to guest/set_enabled");
+    const std::string guestValidity = m_mqttConfig.mqttClientId + "/guest/set_validity";
+    ret = esp_mqtt_client_subscribe(m_client, guestValidity.c_str(), 0);
+    if (ret < 0) ESP_LOGW(TAG, "Failed to subscribe to guest/set_validity");
 
     if (m_mqttConfig.hassMqttDiscoveryEnabled) {
         publishHassDiscovery();
@@ -401,6 +440,7 @@ void MqttManager::onConnected() {
     // Node telemetry is independent of HASS discovery; publish it immediately on
     // connect so household entities have state before the next periodic update.
     publishNodeStatus();
+    publishGuestStatus();
 }
 
 /**
@@ -418,6 +458,11 @@ void MqttManager::onData(const std::string& topic, const std::string& data) {
     // Authenticated household command namespace is handled separately; it is
     // never processed through the legacy numeric topic path below.
     if (handleSecureCommand(topic, data)) {
+        return;
+    }
+
+    // Guest configuration and household sync topics.
+    if (handleGuestConfig(topic, data)) {
         return;
     }
 
@@ -677,6 +722,42 @@ void MqttManager::publishHassDiscovery() {
             p.addString("topic", m_mqttConfig.hkTopic.c_str());
             p.addString("value_template", "{{ value_json.uid }}");
         });
+    }
+
+    // Guest access entities. These deliberately do NOT go through publishConfig()
+    // above: that helper reuses deviceID as unique_id for every legacy entity, which
+    // would make Home Assistant collapse these into one. state_topic is the
+    // token-free status document, so nothing here can be used to clone a card.
+    {
+        const std::string guestStatusTopic = m_mqttConfig.mqttClientId + "/guest/status";
+        auto publishGuestConfig = [&](const char* name, const std::string& objectId,
+                                      const char* entityId, auto fillPayload) {
+            JsonBuilder payload = JsonBuilder::object();
+            if (!payload) {
+                ESP_LOGE(TAG, "Failed to allocate guest discovery JSON object (OOM)");
+                return;
+            }
+            payload.addString("name", name);
+            payload.addString("unique_id", (deviceID + "_" + entityId).c_str());
+            payload.addItem("device", JsonGuard(cJSON_Duplicate(device.get(), true)));
+            payload.addString("state_topic", guestStatusTopic.c_str());
+            fillPayload(payload);
+            publish("homeassistant/sensor/" + objectId + "/config", payload.toStringFormatted(), 1,
+                    true);
+        };
+        publishGuestConfig("Guest access",
+                           m_mqttConfig.mqttClientId + "_guest_access", "guest_access",
+                           [&](JsonBuilder& p) {
+                               p.addString("value_template",
+                                           "{{ 'enabled' if value_json.enabled else 'disabled' }}");
+                               p.addString("json_attributes_topic", guestStatusTopic.c_str());
+                               p.addString("json_attributes_template",
+                                           "{{ value_json | tojson }}");
+                           });
+        publishGuestConfig("Guest tags", m_mqttConfig.mqttClientId + "_guest_tags",
+                           "guest_tags", [&](JsonBuilder& p) {
+                               p.addString("value_template", "{{ value_json.count }}");
+                           });
     }
 
     // Household/node entities (only when enrolled). Stable unique id:
@@ -1031,4 +1112,171 @@ bool MqttManager::handleSecureCommand(const std::string &topic, const std::strin
     }
     ESP_LOGI(TAG, "Authenticated %s command accepted (req %s).", action.c_str(), reqId.c_str());
     return true;
+}
+
+// ---------------------------------------------------------------------------
+// Guest tags
+// ---------------------------------------------------------------------------
+
+void MqttManager::publishGuestStatus() {
+    if (m_guestTags == nullptr) {
+        return;
+    }
+    // Token-free: this document is what Home Assistant reads, so it must not carry
+    // anything that would let a broker reader clone a card.
+    const std::string status = m_guestTags->statusJson(false);
+    publish(m_mqttConfig.mqttClientId + "/guest/status", status, 1, true);
+    const std::string base = baseTopic();
+    if (!base.empty()) {
+        publish(base + "/guest/status", status, 1, true);
+    }
+}
+
+void MqttManager::publishGuestTable() {
+    if (m_guestTags == nullptr || m_node == nullptr) {
+        return;
+    }
+    const std::string base = baseTopic();
+    if (base.empty()) {
+        // Not enrolled in a household: there is no trusted channel to carry the
+        // per-tag tokens, so distribution is skipped rather than done in the clear.
+        return;
+    }
+    auto parsed = parse_json(m_guestTags->statusJson(true));
+    if (!parsed) {
+        return;
+    }
+    cJSON *tags = cJSON_GetObjectItemCaseSensitive(parsed->get(), "tags");
+    if (!cJSON_IsArray(tags)) {
+        return;
+    }
+    JsonBuilder obj = JsonBuilder::object();
+    if (!obj) {
+        return;
+    }
+    // `origin` lets a receiving node ignore its own retained message.
+    obj.addString("origin", m_node->info().node_id);
+    obj.addItem("tags", JsonGuard(cJSON_Duplicate(tags, true)));
+    publish(base + "/guest/table", obj.toStringUnformatted(), 1, true);
+}
+
+void MqttManager::publishGuestTap(const std::string &tagId, const std::string &label,
+                                  bool accepted, uint8_t reason) {
+    const std::string payload =
+        JsonBuilder::object()
+            .addBool("guest", true)
+            .addBool("accepted", accepted)
+            .addString("reason", guest::verifyResultToString(
+                                     static_cast<guest::VerifyResult>(reason)))
+            .addString("tagId", tagId)
+            .addString("label", label)
+            .addString("readerId", this->deviceID)
+            .toStringUnformatted();
+    publish(m_mqttConfig.hkTopic, payload);
+}
+
+void MqttManager::handleGuestTable(const std::string &data) {
+    if (m_guestTags == nullptr || m_node == nullptr) {
+        return;
+    }
+    auto parsed = parse_json(data);
+    if (!parsed) {
+        ESP_LOGW(TAG, "Guest table payload is not valid JSON; ignoring.");
+        return;
+    }
+    cJSON *root = parsed->get();
+    const cJSON *origin = cJSON_GetObjectItemCaseSensitive(root, "origin");
+    if (cJSON_IsString(origin) && m_node->info().node_id == origin->valuestring) {
+        // Our own retained message: nothing to learn from it.
+        return;
+    }
+    const cJSON *tags = cJSON_GetObjectItemCaseSensitive(root, "tags");
+    if (!cJSON_IsArray(tags)) {
+        return;
+    }
+
+    size_t imported = 0;
+    size_t skipped = 0;
+    for (const cJSON *item = tags->child; item != nullptr; item = item->next) {
+        char *raw = cJSON_PrintUnformatted(item);
+        if (raw == nullptr) {
+            ++skipped;
+            continue;
+        }
+        guest::GuestTagRecord rec{};
+        std::string err;
+        const bool ok = GuestTagManager::recordFromJson(raw, rec, err);
+        cJSON_free(raw);
+        if (ok && m_guestTags->importTag(rec)) {
+            ++imported;
+        } else {
+            ++skipped;
+            ESP_LOGW(TAG, "Skipped a guest record from the household: %s",
+                     ok ? "table full or store failed" : err.c_str());
+        }
+    }
+    ESP_LOGI(TAG, "Guest table sync: %u imported, %u skipped.", static_cast<unsigned>(imported),
+             static_cast<unsigned>(skipped));
+    if (imported > 0) {
+        // Deliberately not publishGuestTable(): that would re-broadcast a table we
+        // received, which the origin node would then import back.
+        publishGuestStatus();
+    }
+}
+
+bool MqttManager::handleGuestConfig(const std::string &topic, const std::string &data) {
+    if (m_guestTags == nullptr) {
+        return false;
+    }
+
+    const std::string base = baseTopic();
+    if (!base.empty() && topic == base + "/guest/table") {
+        handleGuestTable(data);
+        return true;
+    }
+
+    const std::string enableTopic = m_mqttConfig.mqttClientId + "/guest/set_enabled";
+    const std::string validityTopic = m_mqttConfig.mqttClientId + "/guest/set_validity";
+
+    if (topic == enableTopic) {
+        const bool on = (data == "1" || data == "ON" || data == "on" || data == "true" ||
+                         data == "True");
+        const bool off = (data == "0" || data == "OFF" || data == "off" || data == "false" ||
+                          data == "False");
+        if (!on && !off) {
+            ESP_LOGW(TAG, "Ignoring guest/set_enabled payload '%s'.", data.c_str());
+            return true;
+        }
+        if (!m_guestTags->setGlobalEnabled(on)) {
+            // Say it plainly: the in-memory flag changed but did not reach NVS, so the
+            // effective state after a reboot is the old one.
+            ESP_LOGE(TAG, "Guest access was changed in memory but could not be stored.");
+        }
+        publishGuestStatus();
+        if (on) {
+            publishGuestTable();
+        }
+        if (m_audit && m_node) {
+            m_audit->record(AuditManager::SECURITY_CONFIG_CHANGE, AuditManager::SOURCE_MQTT,
+                            AuditManager::RESULT_SUCCESS, m_node->info().node_id,
+                            on ? "guest_enabled" : "guest_disabled");
+        }
+        return true;
+    }
+
+    if (topic == validityTopic) {
+        char *end = nullptr;
+        const unsigned long seconds = strtoul(data.c_str(), &end, 10);
+        if (end == data.c_str()) {
+            ESP_LOGW(TAG, "Ignoring guest/set_validity payload '%s'.", data.c_str());
+            return true;
+        }
+        if (!m_guestTags->setDefaultValiditySeconds(static_cast<uint32_t>(seconds))) {
+            ESP_LOGE(TAG, "Default guest validity could not be stored.");
+        }
+        publishGuestStatus();
+        return true;
+    }
+
+    return false;
 }

@@ -44,6 +44,12 @@ public:
     bool exchangeApdu(const std::vector<uint8_t>& send,
                       std::vector<uint8_t>& recv,
                       uint32_t timeoutMs) override;
+    // PN532 InDataExchange carries Type 2 / MIFARE frames, so guest-tag teaching
+    // (the only writable path today) is supported on this backend.
+    bool transceiveRaw(const std::vector<uint8_t>& send,
+                       std::vector<uint8_t>& recv,
+                       uint32_t timeoutMs) override;
+    bool supportsCardWrite() const override { return true; }
     bool healthCheck() override;
     bool updateECP() override { return true;};
 private:

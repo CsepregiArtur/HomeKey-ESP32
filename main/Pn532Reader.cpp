@@ -133,6 +133,25 @@ bool Pn532Reader::exchangeApdu(const std::vector<uint8_t>& send,
     return true;
 }
 
+bool Pn532Reader::transceiveRaw(const std::vector<uint8_t>& send,
+                                std::vector<uint8_t>& recv,
+                                uint32_t timeoutMs) {
+    // Deliberately the same InDataExchange path as exchangeApdu(): the PN532 does
+    // not distinguish APDUs from MIFARE/Type 2 frames here, and a Type 2 tag is
+    // already selected by pollForTag(). Byte-for-byte identical framing means a
+    // READ page <n> reply and an APDU reply are both "strip D5 41 <status>".
+    if (!m_frontend || send.empty() || send.size() > 255) return false;
+    recv.clear();
+    pn532::Status status = m_frontend->InDataExchange(send, recv, timeoutMs);
+    if (status != pn532::Status::SUCCESS) return false;
+    if (recv.size() >= 2) {
+        recv.erase(recv.begin(), recv.begin() + 2);
+    } else {
+        recv.clear();
+    }
+    return true;
+}
+
 bool Pn532Reader::healthCheck() {
     if (!m_frontend) {
         m_connected = false;

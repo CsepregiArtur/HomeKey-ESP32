@@ -75,6 +75,13 @@ public:
     bool exchangeApdu(const std::vector<uint8_t>& send,
                       std::vector<uint8_t>& recv,
                       uint32_t timeoutMs) override;
+    // exchangeApdu() here does ISO-DEP I-block framing in software; there is no
+    // raw Type 2 path yet, so guest tags can be read/verified but not taught.
+    bool transceiveRaw(const std::vector<uint8_t>&, std::vector<uint8_t>&,
+                       uint32_t) override {
+        return false;
+    }
+    bool supportsCardWrite() const override { return false; }
     bool healthCheck() override;
 
     // ECP data is held by reference and re-read on every poll, so there is

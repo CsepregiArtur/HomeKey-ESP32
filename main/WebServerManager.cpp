@@ -25,6 +25,7 @@
 #include "BackupManager.hpp"
 #include "RestoreManager.hpp"
 #include "LockManager.hpp"
+#include "GuestTagManager.hpp"
 #include "DeviceCert.hpp"
 #include "cJSON.h"
 // Must come after the Arduino headers. Arduino's IPAddress.h expands lwip's
@@ -797,6 +798,11 @@ void WebServerManager::setupRoutes() {
       // POST-only: a state change reachable by simply visiting a URL could be driven by
       // any page the user happens to have open.
       {"/api/ha/lock", HTTP_POST, handleHaLock, this},
+      { "/api/ha/guest", HTTP_GET, handleHaGuest, this},
+      {"/api/ha/guest/config", HTTP_POST, handleHaGuestConfig, this},
+      {"/api/ha/guest/teach", HTTP_POST, handleHaGuestTeach, this},
+      {"/api/ha/guest/revoke", HTTP_POST, handleHaGuestRevoke, this},
+      {"/api/ha/guest/cancel", HTTP_POST, handleHaGuestCancel, this},
 
       // Catch-all (must be last)
       {"/*", HTTP_GET, handleRootOrHash, this}};
@@ -3256,6 +3262,247 @@ esp_err_t WebServerManager::handleHaState(httpd_req_t *req) {
   }
 
   sendJsonStr(req, state.toStringUnformatted());
+  return ESP_OK;
+}
+
+// ---------------------------------------------------------------------------
+// /api/ha/guest/* -- guest NFC tags
+// ---------------------------------------------------------------------------
+//
+// Authorisation matches /api/ha/lock: the device credential over TLS. Teaching a
+// card mints a credential, so none of these may be reachable from an
+// unauthenticated local-network request. Reads are GET; every mutation is POST.
+//
+// The guest-tag HTTP API is the contract the Home Assistant integration uses to
+// enable guest access, set a default validity and teach or revoke cards. The
+// equivalent MQTT topics exist for convenience and are only as protected as the
+// broker -- see docs/content/guest-tags.md.
+
+esp_err_t WebServerManager::handleHaGuest(httpd_req_t *req) {
+  WebServerManager *instance = getInstance(req);
+  if (!instance->basicAuth(req)) return sendAuthFailure(req);
+  if (!instance->haRequireTls(req)) return ESP_OK;
+
+  if (instance->m_guestTagManager == nullptr) {
+    return sendJsonError(req, "Guest tags are not available on this device",
+                         "409 Conflict");
+  }
+
+  JsonBuilder out = JsonBuilder::object();
+  if (!out) return sendJsonError(req, "Out of memory", "500 Internal Server Error");
+
+  out.addBool("enabled", instance->m_guestTagManager->globalEnabled());
+  out.addNumber("default_validity_seconds",
+                instance->m_guestTagManager->defaultValiditySeconds());
+  out.addNumber("capacity", instance->m_guestTagManager->capacity());
+  out.addNumber("count", instance->m_guestTagManager->count());
+  out.addNumber("wall_clock", GuestTagManager::wallClockNow());
+
+  // Card-write state (armed / can_write / last result), so the caller can tell
+  // "not armed yet" from "this reader cannot write cards at all".
+  if (instance->m_nfcManager != nullptr) {
+    auto writeState = parse_json(instance->m_nfcManager->guestWriteStatusJson());
+    if (writeState) {
+      out.addItem("write", std::move(*writeState));
+    }
+  }
+
+  // Token-free by construction: the per-tag secret never leaves the device on this
+  // endpoint (nor on the MQTT status topic). Only the household sync topic carries it.
+  out.withArray("tags", [&](JsonBuilder &arr) {
+    for (const auto &rec : instance->m_guestTagManager->list()) {
+      JsonBuilder item = JsonBuilder::object();
+      if (!item) continue;
+      item.addString("tag_id", guest::tagIdHex(rec));
+      item.addString("uid",
+                     guest::uidHex(std::vector<uint8_t>(rec.uid, rec.uid + rec.uid_len)));
+      item.addString("label", std::string(rec.label));
+      item.addBool("enabled", rec.enabled != 0);
+      item.addNumber("valid_from", static_cast<double>(rec.valid_from));
+      item.addNumber("valid_until", static_cast<double>(rec.valid_until));
+      item.addNumber("last_used_at", static_cast<double>(rec.last_used_at));
+      item.addNumber("use_count", static_cast<double>(rec.use_count));
+      arr.addItemToArray(item.extractGuard());
+    }
+  });
+
+  sendJsonStr(req, out.toStringUnformatted());
+  return ESP_OK;
+}
+
+esp_err_t WebServerManager::handleHaGuestConfig(httpd_req_t *req) {
+  WebServerManager *instance = getInstance(req);
+  if (!instance->basicAuth(req)) return sendAuthFailure(req);
+  if (!instance->haRequireTls(req)) return ESP_OK;
+  if (instance->m_guestTagManager == nullptr) {
+    return sendJsonError(req, "Guest tags are not available on this device",
+                         "409 Conflict");
+  }
+
+  std::string body;
+  if (!readBody(req, body, 1024)) {
+    return ESP_OK; // readBody has already answered
+  }
+  auto parsed = parse_json(body);
+  if (!parsed) {
+    return sendJsonError(req, "Invalid JSON", "400 Bad Request");
+  }
+  cJSON *root = parsed->get();
+
+  bool changed = false;
+  const cJSON *enabled = cJSON_GetObjectItemCaseSensitive(root, "enabled");
+  if (cJSON_IsBool(enabled)) {
+    if (!instance->m_guestTagManager->setGlobalEnabled(cJSON_IsTrue(enabled))) {
+      return sendJsonError(req, "Could not store the guest access flag",
+                           "507 Insufficient Storage");
+    }
+    changed = true;
+  }
+  const cJSON *validity = cJSON_GetObjectItemCaseSensitive(root, "default_validity_seconds");
+  if (cJSON_IsNumber(validity) && validity->valuedouble >= 0) {
+    if (!instance->m_guestTagManager->setDefaultValiditySeconds(
+            static_cast<uint32_t>(validity->valuedouble))) {
+      return sendJsonError(req, "Could not store the default validity",
+                           "507 Insufficient Storage");
+    }
+    changed = true;
+  }
+  if (!changed) {
+    return sendJsonError(
+        req, "Expected {\"enabled\":bool} and/or {\"default_validity_seconds\":n}",
+        "400 Bad Request");
+  }
+
+  JsonBuilder out = JsonBuilder::object();
+  out.addBool("success", true);
+  out.addBool("enabled", instance->m_guestTagManager->globalEnabled());
+  out.addNumber("default_validity_seconds",
+                instance->m_guestTagManager->defaultValiditySeconds());
+  out.addString("message", "Guest configuration updated");
+  sendJsonStr(req, out.toStringUnformatted());
+  return ESP_OK;
+}
+
+esp_err_t WebServerManager::handleHaGuestTeach(httpd_req_t *req) {
+  WebServerManager *instance = getInstance(req);
+  if (!instance->basicAuth(req)) return sendAuthFailure(req);
+  if (!instance->haRequireTls(req)) return ESP_OK;
+  if (instance->m_guestTagManager == nullptr) {
+    return sendJsonError(req, "Guest tags are not available on this device",
+                         "409 Conflict");
+  }
+
+  std::string body;
+  if (!readBody(req, body, 1024)) {
+    return ESP_OK; // readBody has already answered
+  }
+  auto parsed = parse_json(body);
+  if (!parsed) {
+    return sendJsonError(req, "Invalid JSON", "400 Bad Request");
+  }
+  cJSON *root = parsed->get();
+
+  const cJSON *labelItem = cJSON_GetObjectItemCaseSensitive(root, "label");
+  const std::string label = cJSON_IsString(labelItem) ? labelItem->valuestring : "Guest";
+
+  uint32_t validFrom = 0;
+  uint32_t validUntil = 0;
+  const cJSON *vf = cJSON_GetObjectItemCaseSensitive(root, "valid_from");
+  if (cJSON_IsNumber(vf) && vf->valuedouble >= 0) {
+    validFrom = static_cast<uint32_t>(vf->valuedouble);
+  }
+  const cJSON *vu = cJSON_GetObjectItemCaseSensitive(root, "valid_until");
+  if (cJSON_IsNumber(vu) && vu->valuedouble >= 0) {
+    validUntil = static_cast<uint32_t>(vu->valuedouble);
+  }
+
+  // Convenience form: "valid for N days from now". Converted here (not in the
+  // manager) because it is a presentation choice, and it needs a wall clock.
+  const cJSON *vd = cJSON_GetObjectItemCaseSensitive(root, "valid_days");
+  if (cJSON_IsNumber(vd) && vd->valuedouble > 0 && validUntil == 0) {
+    const uint32_t now = GuestTagManager::wallClockNow();
+    if (now == 0) {
+      return sendJsonError(req,
+                           "No wall clock yet; use valid_from/valid_until, or retry "
+                           "once NTP has synced",
+                           "409 Conflict");
+    }
+    validFrom = (validFrom == 0) ? now : validFrom;
+    validUntil = now + static_cast<uint32_t>(vd->valuedouble * 86400.0);
+  }
+
+  guest::GuestTagRecord rec{};
+  if (!instance->m_guestTagManager->mintTag(label, validFrom, validUntil, rec)) {
+    return sendJsonError(req, "No free guest slot; revoke a tag first",
+                         "507 Insufficient Storage");
+  }
+
+  // The write happens on the NFC task when a card appears, so this answers
+  // "armed" and the outcome arrives on MQTT. A synchronous answer here would only
+  // be possibly, not actually, true.
+  if (instance->m_nfcManager == nullptr || !instance->m_nfcManager->armGuestWrite(rec)) {
+    return sendJsonError(req,
+                         "Could not arm the card write (one is already pending, or this "
+                         "NFC reader cannot write cards)",
+                         "409 Conflict");
+  }
+
+  JsonBuilder out = JsonBuilder::object();
+  out.addBool("success", true);
+  out.addString("tag_id", guest::tagIdHex(rec));
+  out.addString("label", std::string(rec.label));
+  out.addNumber("valid_from", static_cast<double>(validFrom));
+  out.addNumber("valid_until", static_cast<double>(validUntil));
+  out.addString("message", "Present the card to the reader now");
+  sendJsonStr(req, out.toStringUnformatted());
+  return ESP_OK;
+}
+
+esp_err_t WebServerManager::handleHaGuestRevoke(httpd_req_t *req) {
+  WebServerManager *instance = getInstance(req);
+  if (!instance->basicAuth(req)) return sendAuthFailure(req);
+  if (!instance->haRequireTls(req)) return ESP_OK;
+  if (instance->m_guestTagManager == nullptr) {
+    return sendJsonError(req, "Guest tags are not available on this device",
+                         "409 Conflict");
+  }
+
+  std::string body;
+  if (!readBody(req, body, 512)) {
+    return ESP_OK; // readBody has already answered
+  }
+  auto parsed = parse_json(body);
+  if (!parsed) {
+    return sendJsonError(req, "Invalid JSON", "400 Bad Request");
+  }
+  const cJSON *tagId = cJSON_GetObjectItemCaseSensitive(parsed->get(), "tag_id");
+  if (!cJSON_IsString(tagId)) {
+    return sendJsonError(req, "Expected {\"tag_id\":\"XXXXXXXX\"}", "400 Bad Request");
+  }
+  const std::string id = tagId->valuestring;
+  if (!instance->m_guestTagManager->revokeTag(id)) {
+    return sendJsonError(req, "No such guest tag", "404 Not Found");
+  }
+
+  JsonBuilder out = JsonBuilder::object();
+  out.addBool("success", true);
+  out.addString("tag_id", id);
+  out.addString("message", "Guest tag revoked");
+  sendJsonStr(req, out.toStringUnformatted());
+  return ESP_OK;
+}
+
+esp_err_t WebServerManager::handleHaGuestCancel(httpd_req_t *req) {
+  WebServerManager *instance = getInstance(req);
+  if (!instance->basicAuth(req)) return sendAuthFailure(req);
+  if (!instance->haRequireTls(req)) return ESP_OK;
+
+  const bool cancelled =
+      instance->m_nfcManager != nullptr && instance->m_nfcManager->cancelGuestWrite();
+  JsonBuilder out = JsonBuilder::object();
+  out.addBool("success", true);
+  out.addBool("cancelled", cancelled);
+  sendJsonStr(req, out.toStringUnformatted());
   return ESP_OK;
 }
 

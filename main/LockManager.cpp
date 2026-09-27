@@ -1,6 +1,7 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "config.hpp"
+#include "guest_types.hpp"
 #include "LockManager.hpp"
 #include "HardwareManager.hpp"
 #include "eventStructs.hpp"
@@ -87,23 +88,41 @@ void LockManager::begin() {
       NfcEvent nfc_event = alpaca::deserialize<NfcEvent>(payload, ec);
       if(ec) { ESP_LOGE(TAG, "Failed to deserialize NFC event: %s", ec.message().c_str()); return; }
       ESP_LOGD(TAG, "Received NFC event: %d", nfc_event.type);
-      if(nfc_event.type == HOMEKEY_TAP) {
+      if(nfc_event.type == HOMEKEY_TAP || nfc_event.type == GUEST_TAP) {
         ESP_LOGI(TAG, "Processing NFC tap request...");
-        EventHKTap s = alpaca::deserialize<EventHKTap>(nfc_event.data, ec);
-        if (!ec) {
-          if (s.status) {
-            if (m_miscConfig.lockAlwaysUnlock) {
-              setTargetState(lockStates::UNLOCKED, Source::NFC);
-            } else if (m_miscConfig.lockAlwaysLock) {
-              setTargetState(lockStates::LOCKED, Source::NFC);
-            } else {
-              int newState = (m_currentState == lockStates::LOCKED) ? lockStates::UNLOCKED : lockStates::LOCKED;
-              setTargetState(newState, Source::NFC);
-            }
+        // HomeKey and guest tags deliberately share this local unlock path: a guest
+        // card must unlock with no MQTT/Home Assistant/internet involvement, exactly
+        // like a HomeKey tap. They differ only in how the credential is verified
+        // (Apple's protocol vs. a locally verified payload on the card).
+        bool accepted = false;
+        if (nfc_event.type == HOMEKEY_TAP) {
+          EventHKTap s = alpaca::deserialize<EventHKTap>(nfc_event.data, ec);
+          if (ec) {
+            ESP_LOGE(TAG, "Failed to deserialize HomeKey event: %s", ec.message().c_str());
+            return;
           }
+          accepted = s.status;
         } else {
-          ESP_LOGE(TAG, "Failed to deserialize HomeKey event: %s", ec.message().c_str());
-          return;
+          EventGuestTap g = alpaca::deserialize<EventGuestTap>(nfc_event.data, ec);
+          if (ec) {
+            ESP_LOGE(TAG, "Failed to deserialize guest event: %s", ec.message().c_str());
+            return;
+          }
+          if (!g.status) {
+            ESP_LOGI(TAG, "Guest tap refused: %s",
+                     guest::verifyResultToString(static_cast<guest::VerifyResult>(g.reason)));
+          }
+          accepted = g.status;
+        }
+        if (accepted) {
+          if (m_miscConfig.lockAlwaysUnlock) {
+            setTargetState(lockStates::UNLOCKED, Source::NFC);
+          } else if (m_miscConfig.lockAlwaysLock) {
+            setTargetState(lockStates::LOCKED, Source::NFC);
+          } else {
+            int newState = (m_currentState == lockStates::LOCKED) ? lockStates::UNLOCKED : lockStates::LOCKED;
+            setTargetState(newState, Source::NFC);
+          }
         }
       }
     });

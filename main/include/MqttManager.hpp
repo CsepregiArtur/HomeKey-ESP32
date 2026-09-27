@@ -13,6 +13,7 @@ class NodeIdentityManager;
 class HealthManager;
 class AuditManager;
 class NvsCredentialStore;
+class GuestTagManager;
 namespace espConfig { struct mqttConfig_t; struct mqtt_ssl_t;}
 
 /**
@@ -76,6 +77,29 @@ public:
     void setAuditManager(AuditManager *audit) { m_audit = audit; }
     /// Enables reporting the name a user gave a paired controller (see ReaderDataManager).
     void setReaderDataManager(NvsCredentialStore *reader) { m_readerData = reader; }
+    /// Enables guest-tag status, Home Assistant discovery and household sync.
+    void setGuestTagManager(GuestTagManager *guestTags) { m_guestTags = guestTags; }
+
+    /**
+     * @brief Publish the token-free guest status used by Home Assistant.
+     *
+     * Sent retained to <CLIENT_ID>/guest/status (and to the household namespace
+     * when enrolled) so a subscriber arriving later still sees the current state.
+     */
+    void publishGuestStatus();
+
+    /**
+     * @brief Publish the full guest table (tokens included) to the household topic.
+     *
+     * This is the cross-node distribution path: a card taught on one node must be
+     * verifiable by the others. Only ever sent on the household namespace, which is
+     * already the trusted channel used by the authenticated lock commands.
+     */
+    void publishGuestTable();
+
+    /// Report a guest-card tap (accepted or refused) on the legacy HomeKey topic.
+    void publishGuestTap(const std::string &tagId, const std::string &label, bool accepted,
+                         uint8_t reason);
 
     /// Publish node state + health to homekey/household/<hid>/nodes/<nid>/...
     void publishNodeStatus();
@@ -144,6 +168,11 @@ private:
                                       const std::string &reqId, const std::string &action,
                                       const std::vector<uint8_t> &key);
 
+    /// Import a guest table published by another node (household sync).
+    void handleGuestTable(const std::string &data);
+    /// Apply plain <CLIENT_ID>/guest/set_enabled|set_validity commands.
+    bool handleGuestConfig(const std::string &topic, const std::string &data);
+
     // --- SSL/TLS Configuration ---
     bool configureSSL(esp_mqtt_client_config_t& mqtt_cfg);
     void logSSLError(const char* operation, esp_err_t error);
@@ -163,6 +192,7 @@ private:
     AppEventLoop::SubscriptionHandle m_lock_state_changed;
     AppEventLoop::SubscriptionHandle m_alt_action;
     AppEventLoop::SubscriptionHandle m_nfc_event;
+    AppEventLoop::SubscriptionHandle m_guest_state_changed;
 
     // Status tracking (replaces event-based status publishing)
     MqttErrorCode m_lastErrorCode = MqttErrorCode::NONE;
@@ -174,6 +204,7 @@ private:
     HealthManager *m_health = nullptr;
     AuditManager *m_audit = nullptr;
     NvsCredentialStore *m_readerData = nullptr;
+    GuestTagManager *m_guestTags = nullptr;
     std::deque<std::string> m_seenNonces;  ///< bounded replay protection
 };
 

@@ -15,12 +15,17 @@
 #include "Pn532Reader.hpp"
 #include "Pn7160Reader.hpp"
 #include "St25r3916Reader.hpp"
+#include "GuestTagManager.hpp"
+#include "NtagCardIo.hpp"
+#include "JsonGuard.hpp"
 #include "hal/gpio_types.h"
 #include "utils.hpp"
 
 #include <array>
 #include <cstdint>
+#include <cstring>
 #include <esp_log.h>
+#include <esp_timer.h>
 #include <chrono>
 #include <functional>
 #include <memory>
@@ -73,6 +78,7 @@ std::unique_ptr<ddk::Session> NfcManager::buildAuthSession() {
  * @param nfcFastPollingEnabled If true, shortens the delay between polling iterations.
  */
 NfcManager::NfcManager(NvsCredentialStore& readerDataManager,
+                       GuestTagManager& guestTags,
                        const std::array<uint8_t, 4> &nfcGpioPins,
                        uint8_t nfcReaderType,
                        uint8_t nfcIrqPin,
@@ -84,11 +90,18 @@ NfcManager::NfcManager(NvsCredentialStore& readerDataManager,
       m_nfcIrqPin(nfcIrqPin),
       m_nfcVenPin(nfcVenPin),
       m_readerDataManager(readerDataManager),
+      m_guestTags(guestTags),
       m_hkAuthPrecomputeEnabled(hkAuthPrecomputeEnabled),
       m_nfcFastPollingEnabled(nfcFastPollingEnabled),
       m_pollingTaskHandle(nullptr),
       m_retryTaskHandle(nullptr)
 {
+  m_guestLock = xSemaphoreCreateMutex();
+  if (m_guestLock == nullptr) {
+    // Without the lock, arming a write could race the NFC task. Teaching is the
+    // only thing that stops working; reading and HomeKey are unaffected.
+    ESP_LOGE(TAG, "Could not create the guest-write lock; guest card teaching disabled.");
+  }
   std::copy(ECP_HEAD, ECP_HEAD + 8, m_ecpData.begin());
   if (nfcReaderType == ST25R3916) {
     pinAllocations.emplace(PinFunctions::SDA, GPIOAllocator::instance().acquire(gpio_num_t(nfcGpioPins[0]), GPIO_MODE_DISABLE, GPIOAllocator::PinRole::I2cSda, GPIOAllocator::PinConsumer::Nfc, "I2C_SDA"));
@@ -150,7 +163,12 @@ NfcManager::NfcManager(NvsCredentialStore& readerDataManager,
   });
 }
 
-NfcManager::~NfcManager() = default;
+NfcManager::~NfcManager() {
+  if (m_guestLock != nullptr) {
+    vSemaphoreDelete(m_guestLock);
+    m_guestLock = nullptr;
+  }
+}
 
 /**
  * @brief Initialize the selected NFC reader and start the NFC polling task.
@@ -262,15 +280,33 @@ void NfcManager::pollingTask() {
     }
 
     const uint16_t passiveTargetTimeoutMs = 500;
-    const TickType_t pollDelayTicks =
-        pdMS_TO_TICKS(m_nfcFastPollingEnabled ? 5 : 100);
 
-    ESP_LOGI(TAG,
-             "NFC poll tuning active: delay=%lu ms, passiveTimeout=%u ms",
-             static_cast<unsigned long>(pollDelayTicks * portTICK_PERIOD_MS),
+    ESP_LOGI(TAG, "NFC poll tuning active: passiveTimeout=%u ms",
              static_cast<unsigned int>(passiveTargetTimeoutMs));
 
     while (true) {
+        // An armed card write must be noticed quickly, so poll fast until it is
+        // served or times out.
+        const TickType_t pollDelayTicks =
+            pdMS_TO_TICKS((m_nfcFastPollingEnabled || guestWriteArmed()) ? 5 : 100);
+
+        // Expire an armed write nobody completed, and report it once. Otherwise a
+        // forgotten teach request would silently hijack the next card tapped for
+        // HomeKey and overwrite it.
+        if (m_guestLock != nullptr &&
+            xSemaphoreTake(m_guestLock, portMAX_DELAY) == pdTRUE) {
+            if (m_guestWriteArmed && m_guestWriteDeadlineMs != 0 &&
+                static_cast<uint32_t>(esp_timer_get_time() / 1000) > m_guestWriteDeadlineMs) {
+                m_guestWriteArmed = false;
+                m_guestWriteDeadlineMs = 0;
+                m_guestWriteLastResult = "timeout";
+                m_guestWriteLastMessage = "No card was presented before the write timed out";
+                m_guestWriteLastTagId.clear();
+                ESP_LOGW(TAG, "Guest card write timed out with no card presented.");
+            }
+            xSemaphoreGive(m_guestLock);
+        }
+
         if (m_reconfigRequested.exchange(false, std::memory_order_acq_rel)) {
           ESP_LOGI(TAG, "ECP Frame update requested...");
           if (m_reader) {
@@ -322,7 +358,14 @@ void NfcManager::pollingTask() {
         uint8_t sak;
         if (m_reader->pollForTag(uid, atqa, sak, passiveTargetTimeoutMs)) {
             ESP_LOGI(TAG, "NFC tag detected!");
-            handleTagPresence(uid, atqa, sak);
+            // A pending teach request takes priority: it is a deliberate user act
+            // with a deadline, and it must not fall through to a normal tap.
+            guest::GuestTagRecord armed{};
+            if (takeArmedGuestWrite(armed)) {
+                handleGuestWrite(armed, uid);
+            } else {
+                handleTagPresence(uid, atqa, sak);
+            }
             waitForTagRemoval();
         }
 
@@ -352,7 +395,7 @@ void NfcManager::handleTagPresence(const std::vector<uint8_t>& uid, const std::a
     } else {
         ESP_LOGI(TAG, "Not a HomeKey tag, or failed to select applet.");
         ESP_LOGD(TAG, "Passive target UID: %s (%zu)", fmt::format("{:02X}", fmt::join(uid, "")).c_str(), uid.size());
-        handleGenericTag(uid, atqa, sak);
+        handleGuestOrGenericTag(uid, atqa, sak);
     }
 
     auto stopTime = std::chrono::high_resolution_clock::now();
@@ -490,4 +533,288 @@ void NfcManager::handleGenericTag(const std::vector<uint8_t>& uid, const std::ar
     std::vector<uint8_t> event_data;
     alpaca::serialize(event, event_data);
     AppEventLoop::publish(NFC_EVENT, NFC_TAP_EVENT, event_data.data(), event_data.size());
+}
+
+// ---------------------------------------------------------------------------
+// Guest tags (locally verified card credentials)
+// ---------------------------------------------------------------------------
+
+bool NfcManager::takeArmedGuestWrite(guest::GuestTagRecord &out) {
+    if (m_guestLock == nullptr) {
+        return false;
+    }
+    bool taken = false;
+    if (xSemaphoreTake(m_guestLock, portMAX_DELAY) == pdTRUE) {
+        if (m_guestWriteArmed) {
+            out = m_armedGuestWrite;
+            // Cleared immediately: one armed intent writes exactly one card. A
+            // failure is reported, not retried onto whatever card comes next.
+            m_guestWriteArmed = false;
+            m_guestWriteDeadlineMs = 0;
+            taken = true;
+        }
+        xSemaphoreGive(m_guestLock);
+    }
+    return taken;
+}
+
+void NfcManager::clearArmedGuestWrite(const std::string &result, const std::string &message,
+                                      const std::string &tagId) {
+    if (m_guestLock == nullptr) {
+        return;
+    }
+    if (xSemaphoreTake(m_guestLock, portMAX_DELAY) == pdTRUE) {
+        m_guestWriteArmed = false;
+        m_guestWriteDeadlineMs = 0;
+        m_guestWriteLastResult = result;
+        m_guestWriteLastMessage = message;
+        m_guestWriteLastTagId = tagId;
+        xSemaphoreGive(m_guestLock);
+    }
+}
+
+void NfcManager::publishGuestWriteResult(bool success, const std::string &tagId,
+                                         const std::string &label,
+                                         const std::string &message) {
+    EventGuestWriteResult ev{};
+    ev.success = success;
+    ev.tagId = tagId;
+    ev.label = label;
+    ev.message = message;
+    std::vector<uint8_t> buf;
+    alpaca::serialize(ev, buf);
+    AppEventLoop::publish(GUEST_EVENT, GUEST_WRITE_RESULT, buf.data(), buf.size());
+}
+
+/**
+ * @brief Publish a GUEST_TAP NFC event, accepted or refused.
+ *
+ * Reported on the normal NFC topic so LockManager, HardwareManager and MqttManager
+ * all see it the same way they see a HomeKey tap.
+ */
+void NfcManager::publishGuestTap(guest::VerifyResult result, const guest::GuestTagRecord *rec) {
+    EventGuestTap ev{};
+    ev.status = (result == guest::VerifyResult::Accepted);
+    ev.reason = static_cast<uint8_t>(result);
+    if (rec != nullptr) {
+        ev.tagId = guest::tagIdHex(*rec);
+        ev.label = std::string(rec->label);
+        ev.validUntil = rec->valid_until;
+    }
+    std::vector<uint8_t> d;
+    alpaca::serialize(ev, d);
+    NfcEvent event{.type = GUEST_TAP, .data = d};
+    std::vector<uint8_t> event_data;
+    alpaca::serialize(event, event_data);
+    AppEventLoop::publish(NFC_EVENT, NFC_TAP_EVENT, event_data.data(), event_data.size());
+}
+
+bool NfcManager::readGuestPayload(const std::vector<uint8_t> &uid,
+                                  std::array<uint8_t, guest::kCardPayloadLen> &payload) {
+    (void)uid; // Kept in the signature: the payload is UID-bound, callers pass both.
+    if (m_reader == nullptr || !m_reader->supportsCardWrite()) {
+        // Reading the payload uses the same raw Type 2 path as writing. Without it
+        // the card cannot be inspected, so a guest tap cannot be verified.
+        return false;
+    }
+    // The failed HomeKey SELECT attempt may have left the PN532 without an active
+    // target for a raw MIFARE/Type 2 exchange, so re-activate the card first.
+    std::vector<uint8_t> freshUid;
+    std::array<uint8_t, 2> atqa{};
+    uint8_t sak = 0;
+    if (!m_reader->pollForTag(freshUid, atqa, sak, 500)) {
+        return false;
+    }
+    return ntag::readPages(*m_reader, ntag::kUserFirstPage, payload.data(), payload.size());
+}
+
+/**
+ * @brief Guest-tag check, falling back to the generic tag path.
+ *
+ * Only runs the (relatively slow) raw page read when the node actually holds guest
+ * tags, so ordinary unknown cards keep their current fast path.
+ */
+void NfcManager::handleGuestOrGenericTag(const std::vector<uint8_t> &uid,
+                                         const std::array<uint8_t, 2> &atqa,
+                                         const uint8_t &sak) {
+    if (m_guestTags.count() > 0) {
+        std::array<uint8_t, guest::kCardPayloadLen> payload{};
+        if (readGuestPayload(uid, payload)) {
+            guest::GuestTagRecord rec{};
+            const uint32_t now = GuestTagManager::wallClockNow();
+            const guest::VerifyResult result = m_guestTags.verify(uid, payload, now, &rec);
+            if (result != guest::VerifyResult::NoRecord) {
+                ESP_LOGI(TAG, "Guest tag %s: %s", guest::tagIdHex(rec).c_str(),
+                         guest::verifyResultToString(result));
+                publishGuestTap(result, &rec);
+                if (result == guest::VerifyResult::Accepted) {
+                    m_guestTags.markUsed(guest::tagIdHex(rec), now);
+                    // A verified guest card is a credential, not an anonymous tag.
+                    return;
+                }
+            }
+        }
+    }
+    handleGenericTag(uid, atqa, sak);
+}
+
+/**
+ * @brief Write a guest credential to the card currently in the field.
+ *
+ * Ordering matters: identify the card, build the payload, write it, verify it by
+ * read-back, and only then commit the record to NVS. Committing first would leave
+ * a credential for a card that does not exist whenever a write fails.
+ */
+void NfcManager::handleGuestWrite(const guest::GuestTagRecord &rec,
+                                  const std::vector<uint8_t> &uid) {
+    const std::string tagId = guest::tagIdHex(rec);
+    const std::string label = std::string(rec.label);
+
+    auto fail = [&](const std::string &message) {
+        ESP_LOGW(TAG, "Guest card write failed: %s", message.c_str());
+        clearArmedGuestWrite("failed", message, tagId);
+        publishGuestWriteResult(false, tagId, label, message);
+    };
+
+    if (m_reader == nullptr || !m_reader->supportsCardWrite()) {
+        fail("This NFC reader cannot write cards");
+        return;
+    }
+
+    ntag::Info info{};
+    if (!ntag::identify(*m_reader, info)) {
+        fail("Not an ISO14443A Type 2 tag (use NTAG213/215/216)");
+        return;
+    }
+    if (info.userBytes < guest::kCardPayloadLen) {
+        fail(fmt::format("Card too small: {} has {} bytes, need {}", ntag::familyToString(info.family),
+                         static_cast<unsigned>(info.userBytes),
+                         static_cast<unsigned>(guest::kCardPayloadLen)));
+        return;
+    }
+
+    std::array<uint8_t, guest::kCardPayloadLen> payload{};
+    std::string err;
+    if (!GuestTagManager::buildCardPayload(rec, uid, payload, err)) {
+        fail("Could not build the card payload: " + err);
+        return;
+    }
+
+    if (!ntag::writePages(*m_reader, ntag::kUserFirstPage, payload.data(), payload.size())) {
+        fail("Card write failed or did not verify");
+        return;
+    }
+
+    // The card is written; now make the credential real on this node.
+    guest::GuestTagRecord committed = rec;
+    committed.uid_len = static_cast<uint8_t>(uid.size());
+    std::memcpy(committed.uid, uid.data(), std::min(uid.size(), guest::kUidMaxLen));
+
+    if (!m_guestTags.commitTag(committed)) {
+        // The card carries a payload this node will not accept. Saying "written"
+        // here would send the user away with a card that silently does nothing.
+        fail("Card written but the credential could not be stored");
+        return;
+    }
+
+    ESP_LOGI(TAG, "Guest tag %s written and verified on card %s.", tagId.c_str(),
+             guest::uidHex(std::vector<uint8_t>(committed.uid,
+                                                committed.uid + committed.uid_len))
+                 .c_str());
+    clearArmedGuestWrite("success", "Card written and verified", tagId);
+    publishGuestWriteResult(true, tagId, label, "Card written and verified");
+    // Lets MQTT re-publish the table so the other household nodes learn the tag.
+    AppEventLoop::publish(GUEST_EVENT, GUEST_STATE_CHANGED, nullptr, 0);
+}
+
+bool NfcManager::armGuestWrite(const guest::GuestTagRecord &rec, uint32_t timeoutSeconds) {
+    if (m_guestLock == nullptr) {
+        return false;
+    }
+    if (m_reader == nullptr || !m_reader->supportsCardWrite()) {
+        if (xSemaphoreTake(m_guestLock, portMAX_DELAY) == pdTRUE) {
+            m_guestWriteLastResult = "unsupported";
+            m_guestWriteLastMessage = "This NFC reader cannot write cards";
+            m_guestWriteLastTagId = guest::tagIdHex(rec);
+            xSemaphoreGive(m_guestLock);
+        }
+        ESP_LOGW(TAG, "Cannot arm a guest write: the active reader has no raw card path.");
+        return false;
+    }
+
+    bool ok = false;
+    if (xSemaphoreTake(m_guestLock, portMAX_DELAY) == pdTRUE) {
+        if (!m_guestWriteArmed) {
+            m_armedGuestWrite = rec;
+            m_guestWriteArmed = true;
+            const uint32_t hold = (timeoutSeconds == 0 ? 60u : timeoutSeconds);
+            m_guestWriteDeadlineMs =
+                static_cast<uint32_t>(esp_timer_get_time() / 1000) + hold * 1000u;
+            m_guestWriteLastResult = "armed";
+            m_guestWriteLastMessage = "Present the card to write";
+            m_guestWriteLastTagId = guest::tagIdHex(rec);
+            ok = true;
+        }
+        xSemaphoreGive(m_guestLock);
+    }
+    if (ok) {
+        ESP_LOGI(TAG, "Guest write armed for tag %s; present the card within %u s.",
+                 guest::tagIdHex(rec).c_str(),
+                 static_cast<unsigned>(timeoutSeconds == 0 ? 60 : timeoutSeconds));
+    }
+    return ok;
+}
+
+bool NfcManager::cancelGuestWrite() {
+    if (m_guestLock == nullptr) {
+        return false;
+    }
+    bool had = false;
+    if (xSemaphoreTake(m_guestLock, portMAX_DELAY) == pdTRUE) {
+        had = m_guestWriteArmed;
+        m_guestWriteArmed = false;
+        m_guestWriteDeadlineMs = 0;
+        if (had) {
+            m_guestWriteLastResult = "cancelled";
+            m_guestWriteLastMessage = "Card write cancelled";
+        }
+        xSemaphoreGive(m_guestLock);
+    }
+    return had;
+}
+
+bool NfcManager::guestWriteArmed() const {
+    if (m_guestLock == nullptr) {
+        return false;
+    }
+    bool armed = false;
+    if (xSemaphoreTake(m_guestLock, portMAX_DELAY) == pdTRUE) {
+        armed = m_guestWriteArmed;
+        xSemaphoreGive(m_guestLock);
+    }
+    return armed;
+}
+
+std::string NfcManager::guestWriteStatusJson() const {
+    bool armed = false;
+    std::string result = "none";
+    std::string message;
+    std::string tagId;
+    if (m_guestLock != nullptr && xSemaphoreTake(m_guestLock, portMAX_DELAY) == pdTRUE) {
+        armed = m_guestWriteArmed;
+        result = m_guestWriteLastResult;
+        message = m_guestWriteLastMessage;
+        tagId = m_guestWriteLastTagId;
+        xSemaphoreGive(m_guestLock);
+    }
+    JsonBuilder obj = JsonBuilder::object();
+    if (!obj) {
+        return "{}";
+    }
+    obj.addBool("armed", armed);
+    obj.addBool("can_write", canWriteCards());
+    obj.addString("last_result", result);
+    obj.addString("last_message", message);
+    obj.addString("last_tag_id", tagId);
+    return obj.toStringUnformatted();
 }
