@@ -32,6 +32,10 @@ keys/
 *.firmware.factory.bin
 littlefs.bin
 
+# Ready-to-upload image written by scripts/ota_update.py for the web UI's Update page.
+homekey-ota-*.bin
+homekey-ota-*.bin.sha256
+
 # Python bytecode
 __pycache__/
 *.pyc

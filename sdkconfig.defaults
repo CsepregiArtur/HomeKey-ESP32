@@ -1,12 +1,14 @@
-# Single-slot (no OTA) flash layout: one application slot (`factory`), no OTA
-# data partition and no second slot. Rollback is an OTA concept and there is
-# nothing left to roll back to, so the bootloader option must be off.
-# Layout, trade-offs and the migration procedure: docs/content/SINGLE_SLOT_LAYOUT.md
-CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=n
+# Dual-slot (OTA) flash layout: `app0`/`app1` as `ota_0`/`ota_1` plus `otadata`, so
+# the node can update itself over the network. `nvs` keeps the size the single-slot
+# layout gave it, so switching tables cannot orphan credentials.
+# Rollback is what makes a broken update survivable, so it is on. It requires the
+# running image to confirm itself (see the end of setup() in main/main.cpp).
+# Layout and the trade-offs: docs/content/updates.md
+CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
 CONFIG_BOOTLOADER_LOG_LEVEL_ERROR=y
 CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
 CONFIG_PARTITION_TABLE_CUSTOM=y
-CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="no_ota.csv"
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="with_ota.csv"
 CONFIG_ARDUINO_USE_USB_JTAG=y
 CONFIG_AUTOSTART_ARDUINO=y
 CONFIG_ARDUINO_SELECTIVE_COMPILATION=y

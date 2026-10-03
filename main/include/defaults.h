@@ -83,8 +83,11 @@
 #define AP_IDLE_CYCLE_MIN 10 // Restart the setup AP after this many minutes with no connected client (0 = never)
 
 // Ethernet Settings
+//
+// The Ethernet driver, its configuration and its Web UI page were removed from this
+// build: the transport is Wi-Fi only and no Ethernet PHY is compiled in. The fields
+// below are kept only so an existing NVS blob still deserializes; nothing reads them.
 #define ETH_ENABLED false // Enable or disable Ethernet connectivity
-// See https://github.com/rednblkx/HomeKey-ESP32/blob/main/main/include/eth_structs.hpp for supported chips and presets
 #define ETH_ACTIVE_PRESET 255 // Ethernet preset index (255 for custom pins)
 #define ETH_PHY_TYPE 1 // Ethernet PHY type identifier
 // Ethernet RMII Configuration

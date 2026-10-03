@@ -214,7 +214,7 @@ dependencies:
       type: service
     version: 1.8.2
   espressif/esp-modbus:
-    component_hash: a52eabcf5e1f81f16f730c70981e69338ea33aee9c44fa512c644d1d8942aa16
+    component_hash: 26a64a9531b5e15a1bbdb9064f2f8715df5b150bfb821dd493174a5aa7566bf8
     dependencies:
     - name: idf
       require: private
@@ -222,7 +222,7 @@ dependencies:
     source:
       registry_url: https://components.espressif.com
       type: service
-    version: 2.1.3
+    version: 2.1.4
   espressif/esp-zboss-lib:
     component_hash: 321883d142421f65009972408287441794250057668a11abbdfd8bec77c3309a
     dependencies:
@@ -451,7 +451,7 @@ dependencies:
       type: service
     version: 1.0.22~1
   espressif/mdns:
-    component_hash: b679eafd0acae2066e2645bd91d073e33ca5be515e2545cd3c4e55a3e3bce3cb
+    component_hash: b5b30022c46302eab89c1d2e3b6fb5918a627563a7462f0ee284b22b9a934967
     dependencies:
     - name: idf
       require: private
@@ -459,7 +459,7 @@ dependencies:
     source:
       registry_url: https://components.espressif.com
       type: service
-    version: 1.13.1
+    version: 1.14.0
   espressif/network_provisioning:
     component_hash: ef2e10182fd1861e68b821491916327c25416ca7ae70e5a6e43313dbc71fe993
     dependencies:
@@ -614,6 +614,6 @@ direct_dependencies:
 - espressif/libsodium
 - idf
 - joltwallet/littlefs
-manifest_hash: db387e12200ef576b0cc5ec424dd5384f1ffca06bcb1114b02bbb643068176b8
+manifest_hash: 7796deee5d1bc141c025c545dd6f11122916567ebb784c3569f5c4eb9d8bae2c
 target: esp32
 version: 2.0.0

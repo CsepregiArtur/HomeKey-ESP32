@@ -13,8 +13,6 @@
 #include "fmt/ranges.h"
 #include "freertos/idf_additions.h"
 #include "Pn532Reader.hpp"
-#include "Pn7160Reader.hpp"
-#include "St25r3916Reader.hpp"
 #include "GuestTagManager.hpp"
 #include "NtagCardIo.hpp"
 #include "JsonGuard.hpp"
@@ -189,24 +187,6 @@ bool NfcManager::begin() {
     if (m_nfcReaderType == 0) {
         m_reader = std::make_unique<Pn532Reader>(nfcGpioPins, m_ecpData);
         ESP_LOGI(TAG, "Using PN532 reader");
-    } else if (m_nfcReaderType == 1) {
-    	 if (m_nfcIrqPin == 255 || m_nfcVenPin == 255) {
-				 ESP_LOGE(TAG, "PN7160 selected but IRQ/VEN pins are unset");
-				 return false;
-			 }
-			m_reader = std::make_unique<Pn7160Reader>(nfcGpioPins, m_nfcIrqPin, m_nfcVenPin, m_ecpData);
-			ESP_LOGI(TAG, "Using PN7160 reader");
-    } else if (m_nfcReaderType == 2) {
-        // I2C: nfcGpioPins[0] = SDA, [1] = SCL. Entries [2]/[3] are unused.
-        // Checked here for the same reason the PN7160 branch checks IRQ/VEN:
-        // otherwise an unconfigured device reaches i2c_new_master_bus() with
-        // sda_io_num = 255 and reports only a generic driver argument error.
-        if (nfcGpioPins[0] == 255 || nfcGpioPins[1] == 255) {
-            ESP_LOGE(TAG, "ST25R3916 selected but SDA/SCL pins are unset");
-            return false;
-        }
-        m_reader = std::make_unique<St25r3916Reader>(nfcGpioPins, m_ecpData);
-        ESP_LOGI(TAG, "Using ST25R3916 reader (I2C)");
     } else {
     	ESP_LOGE(TAG, "Unsupported NFC reader type: %u", m_nfcReaderType);
     	return false;

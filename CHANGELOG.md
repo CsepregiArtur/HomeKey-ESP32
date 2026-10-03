@@ -3,20 +3,63 @@
 Notable changes per release. User-facing detail lives in the docs:
 [Security](docs/content/security.md) and [Updates / breaking changes](docs/content/updates.md).
 
-## Unreleased
+## 0.12.0 - 2026-10-03
 
-### Removed
-
-* **Over-the-air firmware updates.** The device now uses a single-slot flash layout
-  (`no_ota.csv`): one `factory` application partition of 3840 KiB instead of two OTA slots of
-  1920 KiB, and no `otadata`. The application partition went from 3.3% free to 52% free, and
-  `nvs` grew from 24 KiB to 92 KiB. Removed with it: the `/ota/*` upload endpoint, the
-  "update from GitHub" routes, HomeSpan's OTA upload service, the OTA password, the browser
-  upload page, and the OTA signature-verification settings. **Firmware is installed over
-  serial only** - a partition table cannot be delivered over the air. See
-  [Single-slot layout](docs/content/SINGLE_SLOT_LAYOUT.md).
+Firmware updates over the network come back, and the two features that were paying for the
+second application slot are removed to make room for it. **Moving an existing device onto this
+layout needs one serial flash**; after that, updates are wireless.
 
 ### Added
+
+* **Firmware updates over the network are back, without a web UI for them.** The flash layout
+  returns to two application slots (`ota_0`/`ota_1`) plus `otadata`, so an image is written into
+  the slot the device is *not* running from and a corrupt upload leaves the running firmware
+  untouched. `nvs` keeps the 92 KiB the single-slot layout gave it rather than shrinking back to
+  24 KiB, because NVS only moves forward and shrinking it could silently drop Wi-Fi credentials,
+  HomeKit pairing or reader enrolment - the 68 KiB comes out of the two application slots instead
+  (1856 KiB each). **Every existing device needs one serial flash to move onto this table**: the
+  old table is what describes where an image may be written, and it does not know about the new
+  slots. After that one cable, updates are wireless.
+  * `POST /api/ota/firmware` streams an image straight into the inactive slot in 4 KiB chunks.
+    POST-only, requires the Web UI credentials, and refuses over plain HTTP - an image is the most
+    valuable thing a caller can send, and letting it cross the LAN in the clear would let anyone
+    on the network read it and substitute their own.
+  * `CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y` with a confirmation at the end of `setup()`. Without
+    that explicit confirmation a freshly installed image would be abandoned on the next reset and
+    an update would look like it silently undid itself.
+  * **`scripts/ota_update.py`** drives both paths from one command: it flashes over the cable when a
+    device is attached, otherwise discovers devices over mDNS and asks which to update - one, or
+    all of them for a mass update. The device certificate is **pinned by fingerprint** (the
+    certificate is self-signed with a fixed validity, so neither the chain nor the hostname can be
+    checked), the Web UI password lives in the **macOS Keychain**, and every secret is masked before
+    anything is printed. `--prepare-for-ui` writes the ready-to-upload image next to a `.sha256`
+    checksum for the web UI's Update page.
+  * **The web UI has an Update page again** - see below - which is why the script asks whether to
+    prepare a file for it.
+
+* **A firmware update page in the web UI.** *Update* in the navigation menu shows the running
+  version and partition and the application slot size, takes a `.bin` file, and reports upload
+  progress (1.7 MB over Wi-Fi is long enough that a silent bar looks like a hang). It requires
+  HTTPS, and refuses over plain HTTP with an explanation. A device on the single-slot layout
+  reports that it has nowhere to write an update instead of failing later.
+
+### Changed
+
+* **Ethernet was removed.** The driver, its configuration, its `/eth_get_config` endpoint, the
+  `ethernetEnabled` field in the Web UI and the captive-portal Ethernet save path are gone; the
+  transport is Wi-Fi only. The configuration fields remain so an existing NVS blob still
+  deserializes, but nothing reads them. Measured saving: **~100 KB of flash**.
+
+* **The PN7160 and ST25R3916 NFC readers were removed; this build is PN532-only.** The `nfcReaderType`
+  setting accepts only `0`, and anything else is rejected with an explanatory message rather than
+  silently ignored. Measured saving: **~17 KB**.
+
+  Together these free **~120 KB**, which is what makes the dual-slot layout fit: it takes the
+  application slot from 4.8% free to ~7.8%, and in the single-slot layout from 52% to 55%.
+
+  Superseding the previous cycle: that removal made the single-slot layout the only option, and
+  this release puts the choice back. `no_ota.csv` stays in the tree and documented for anyone who
+  prefers its ~55% free application slot and does not need network updates.
 
 * **Guest NFC tags - temporary access for people without an Apple device.** Teach an
   ordinary NTAG213/215/216 card on a node with a PN532 reader and it unlocks exactly like a

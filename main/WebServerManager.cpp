@@ -8,7 +8,6 @@
 #include "esp_system.h"
 #include "app_event_loop.hpp"
 #include "app_events.hpp"
-#include "EthernetDriver.hpp"
 #include "fmt/ranges.h"
 #include "WebServerManager.hpp"
 #include "ConfigManager.hpp"
@@ -43,7 +42,6 @@
 #include "esp_log.h"
 #include "esp_log_level.h"
 #include "esp_wifi.h"
-#include "eth_structs.hpp"
 #include "eventStructs.hpp"
 #include "freertos/idf_additions.h"
 #include "loggable.hpp"
@@ -750,7 +748,6 @@ void WebServerManager::setupRoutes() {
       {"/config", HTTP_GET, handleGetConfig, this},
       {"/config/clear", HTTP_POST, handleClearConfig, this},
       {"/config/save", HTTP_POST, handleSaveConfig, this},
-      {"/eth_get_config", HTTP_GET, handleGetEthConfig, this},
       {"/nfc_get_presets", HTTP_GET, handleGetNfcPresets, this},
 
       // Action endpoints. State changes are POST-only: a plain GET is reachable
@@ -804,6 +801,15 @@ void WebServerManager::setupRoutes() {
       {"/api/ha/guest/revoke", HTTP_POST, handleHaGuestRevoke, this},
       {"/api/ha/guest/cancel", HTTP_POST, handleHaGuestCancel, this},
 
+      // Firmware update: the Web UI page and the host-side update script are the only
+      // clients. `/api/ota/info` is readable without credentials for the same reason
+      // `/api/ha/info` is - the page has to render "which version is this, and does it
+      // even have a second slot" before it can be trusted with a password, and every
+      // field it returns is already broadcast in the mDNS TXT record. The upload itself
+      // is POST-only and needs both credentials and TLS.
+      {"/api/ota/info", HTTP_GET, handleOtaInfo, this},
+      {"/api/ota/firmware", HTTP_POST, handleOtaFirmware, this},
+
       // Catch-all (must be last)
       {"/*", HTTP_GET, handleRootOrHash, this}};
 
@@ -849,7 +855,6 @@ void WebServerManager::setupCaptivePortalRoutes() {
       {"/captive_portal_config", HTTP_GET, handleGetCaptivePortalConfig, this},
       {"/captive_portal_config", HTTP_POST, handleSaveCaptivePortalConfig, this},
       {"/nfc_get_presets", HTTP_GET, handleGetNfcPresets, this},
-      {"/eth_get_config", HTTP_GET, handleGetEthConfig, this},
       {"/wifi_scan", HTTP_GET, handleWifiScan, this},
       {"/reboot_device", HTTP_POST, handleReboot, this},
       // Static files needed for the captive portal UI
@@ -1144,79 +1149,6 @@ esp_err_t WebServerManager::handleGetNfcPresets(httpd_req_t *req) {
 
   std::string resp = response.toStringUnformatted();
   httpd_resp_set_type(req, "application/json");
-  httpd_resp_send(req, resp.c_str(), HTTPD_RESP_USE_STRLEN);
-  return ESP_OK;
-}
-
-esp_err_t WebServerManager::handleGetEthConfig(httpd_req_t *req) {
-  WebServerManager *instance = getInstance(req);
-  if(!instance->basicAuth(req)){
-    return sendAuthFailure(req);
-  }
-  if (!instance) {
-    httpd_resp_send_500(req);
-    return ESP_FAIL;
-  }
-
-  JsonBuilder eth_config = JsonBuilder::object();
-
-  // Supported chips
-  eth_config.withArray("supportedChips", [&](JsonBuilder& chipsArray) {
-    for (auto &&v : eth_config_ns::supportedChips) {
-      JsonBuilder chip = JsonBuilder::object();
-      chip.addString("name", v.second.name.c_str());
-      chip.addBool("emac", v.second.emac);
-      chip.addNumber("phy_type", v.second.phy_type);
-      chipsArray.addItemToArray(std::move(chip).release());
-    }
-  });
-
-  // Board presets
-  eth_config.withArray("boardPresets", [&](JsonBuilder& boardPresetsArray) {
-    for (auto &&v : eth_config_ns::boardPresets) {
-      JsonBuilder preset = JsonBuilder::object();
-      preset.addString("name", v.name.c_str());
-
-      preset.withObject("ethChip", [&](JsonBuilder& chip) {
-        chip.addString("name", v.ethChip.name.c_str());
-        chip.addBool("emac", v.ethChip.emac);
-        chip.addNumber("phy_type", v.ethChip.phy_type);
-      });
-
-      if(v.ethChip.emac){
-#if CONFIG_ETH_USE_ESP32_EMAC
-        preset.withObject("rmii_conf", [&](JsonBuilder& rmii_conf) {
-          rmii_conf.addNumber("phy_addr", v.rmii_conf.phy_addr);
-          rmii_conf.addNumber("pin_mcd", v.rmii_conf.pin_mcd);
-          rmii_conf.addNumber("pin_mdio", v.rmii_conf.pin_mdio);
-          rmii_conf.addNumber("pin_power", v.rmii_conf.pin_power);
-          rmii_conf.addNumber("pin_rmii_clock", v.rmii_conf.pin_rmii_clock);
-        });
-#endif
-      } else {
-        preset.withObject("spi_conf", [&](JsonBuilder& spi_conf) {
-          spi_conf.addNumber("spi_freq_mhz", v.spi_conf.spi_freq_mhz);
-          spi_conf.addNumber("pin_cs", v.spi_conf.pin_cs);
-          spi_conf.addNumber("pin_irq", v.spi_conf.pin_irq);
-          spi_conf.addNumber("pin_rst", v.spi_conf.pin_rst);
-          spi_conf.addNumber("pin_sck", v.spi_conf.pin_sck);
-          spi_conf.addNumber("pin_miso", v.spi_conf.pin_miso);
-          spi_conf.addNumber("pin_mosi", v.spi_conf.pin_mosi);
-        });
-      }
-      boardPresetsArray.addItemToArray(std::move(preset).release());
-    }
-  });
-
-  eth_config.addBool("ethEnabled", instance->m_configManager.getConfig<espConfig::misc_config_t>().ethernetEnabled);
-  eth_config.addNumber("numSpiBuses", SPI_HOST_MAX - 1);
-
-  httpd_resp_set_type(req, "application/json");
-  JsonBuilder response = JsonBuilder::object();
-  response.addBool("success", true);
-  response.addItem("data", std::move(eth_config).release());
-  
-  std::string resp = response.toStringUnformatted();
   httpd_resp_send(req, resp.c_str(), HTTPD_RESP_USE_STRLEN);
   return ESP_OK;
 }
@@ -1792,101 +1724,6 @@ struct WifiSaveParams {
     std::string cleaned_body_str;
 };
 
-struct EthSaveParams {
-    httpd_req_t* req;
-    WebServerManager* instance;
-    std::string setupCode;
-    bool hasSetupCode;
-    std::string cleaned_body_str;
-};
-
-static constexpr int ETH_IP_WAIT_MS = 3000;
-
-/**
- * @brief Persist the captive-portal submission, start the ethernet driver, and
- *        report whether it came up.
- *
- * Runs off the HTTPD task (the request is completed asynchronously). The
- * ETH_GOT_IP subscription is registered before the driver starts so the event
- * cannot be missed. Outcomes:
- * - driver failed to start -> 400, error message; the portal lets the user fix
- *   the ethernet settings and resubmit.
- * - driver started + IP within ETH_IP_WAIT_MS -> success with the real IP.
- * - driver started, no IP -> success with 0.0.0.0 and an explanatory message;
- *   the device reports 0.0.0.0 until the link/DHCP comes up after reboot.
- */
-void WebServerManager::captivePortalEthSaveTask(void *pvParameters) {
-  EthSaveParams *params = static_cast<EthSaveParams *>(pvParameters);
-
-  if (params->hasSetupCode) {
-    homeSpan.setPairingCode(params->setupCode.c_str(), false);
-  }
-
-  params->instance->m_configManager.updateFromJson<espConfig::misc_config_t>(
-      params->cleaned_body_str);
-  params->instance->m_configManager.saveConfig<espConfig::misc_config_t>();
-
-  EventGroupHandle_t ethEvents = xEventGroupCreate();
-  auto gotIpSub = AppEventLoop::subscribe(ETH_APP_EVENT, ETH_GOT_IP,
-      [ethEvents](const uint8_t* data, size_t size){
-        if (ethEvents) xEventGroupSetBits(ethEvents, BIT0);
-      });
-
-  const auto miscConfig =
-      params->instance->m_configManager.getConfig<espConfig::misc_config_t>();
-  const bool driverStarted = EthernetDriver::start(miscConfig);
-
-  bool gotIp = false;
-  std::string ipAddr = "0.0.0.0";
-  if (driverStarted) {
-    if (ethEvents && gotIpSub.is_valid()) {
-      gotIp = (xEventGroupWaitBits(ethEvents, BIT0, pdFALSE, pdFALSE,
-                                   pdMS_TO_TICKS(ETH_IP_WAIT_MS)) & BIT0) != 0;
-    }
-    if (gotIp) {
-      ipAddr = ETH.localIP().toString().c_str();
-    }
-  }
-
-  if (gotIpSub.is_valid()) gotIpSub.reset();
-  if (ethEvents) vEventGroupDelete(ethEvents);
-
-  httpd_resp_set_type(params->req, "application/json");
-  JsonBuilder res = JsonBuilder::object();
-  std::string message;
-  if (!driverStarted) {
-    httpd_resp_set_status(params->req, "400 Bad Request");
-    res.addBool("success", false);
-    message = "Ethernet driver failed to start. Please check your Ethernet "
-              "module settings and try again.";
-    res.addString("error", message.c_str());
-  } else {
-    res.addBool("success", true);
-    if (gotIp) {
-      message = "Configuration saved. Device will now reboot.";
-    } else {
-      message = "Configuration saved. The Ethernet driver started, but no IP "
-                "address was assigned within 3 seconds. Device will now reboot.";
-    }
-    res.withObject("data", [&](JsonBuilder &data) {
-      data.addString("ip_addr", ipAddr.c_str());
-    });
-    // The main Web UI needs these credentials, and this is the last screen the user
-    // sees before the device reboots, so repeat them in the message.
-    const auto &savedMisc = params->instance->m_configManager.getConfig<espConfig::misc_config_t>();
-    if (savedMisc.webAuthEnabled) {
-      message += fmt::format(" Web UI login: {} / {}", savedMisc.webUsername, savedMisc.webPassword);
-    }
-    res.addString("message", message.c_str());
-  }
-
-  std::string response = res.toStringUnformatted();
-  httpd_resp_send(params->req, response.c_str(), HTTPD_RESP_USE_STRLEN);
-  httpd_req_async_handler_complete(params->req);
-  delete params;
-  vTaskDelete(NULL);
-}
-
 void WebServerManager::captivePortalSaveTask(void *pvParameters) {
   WifiSaveParams *params = static_cast<WifiSaveParams *>(pvParameters);
 
@@ -2037,15 +1874,12 @@ esp_err_t WebServerManager::handleSaveCaptivePortalConfig(httpd_req_t *req) {
     }
   }
 
-  cJSON *ethEnabledItem = cJSON_GetObjectItem(obj.get(), "ethernetEnabled");
-  bool ethernetEnabled = (ethEnabledItem && cJSON_IsBool(ethEnabledItem) && cJSON_IsTrue(ethEnabledItem));
-
-  if (!ethernetEnabled && !wifiProvided) {
+  if (!wifiProvided) {
     httpd_resp_set_status(req, "400 Bad Request");
     httpd_resp_set_type(req, "application/json");
     std::string response = JsonBuilder::object()
         .addBool("success", false)
-        .addString("error", "WiFi SSID and password are required (or enable Ethernet)")
+        .addString("error", "WiFi SSID and password are required")
         .toStringUnformatted();
     httpd_resp_send(req, response.c_str(), HTTPD_RESP_USE_STRLEN);
     return ESP_FAIL;
@@ -2073,10 +1907,10 @@ esp_err_t WebServerManager::handleSaveCaptivePortalConfig(httpd_req_t *req) {
   }
 
   cJSON *nfcReaderTypeItem = cJSON_GetObjectItem(obj.get(), "nfcReaderType");
-  if (nfcReaderTypeItem && cJSON_IsNumber(nfcReaderTypeItem) && (nfcReaderTypeItem->valueint < 0 || nfcReaderTypeItem->valueint > 2)) {
+  if (nfcReaderTypeItem && cJSON_IsNumber(nfcReaderTypeItem) && nfcReaderTypeItem->valueint != 0) {
     httpd_resp_set_status(req, "400 Bad Request");
     httpd_resp_set_type(req, "application/json");
-    httpd_resp_sendstr(req, "{\"success\":false,\"error\":\"Invalid nfcReaderType\"}");
+    httpd_resp_sendstr(req, "{\"success\":false,\"error\":\"This build supports the PN532 reader only\"}");
     return ESP_FAIL;
   }
 
@@ -2124,36 +1958,6 @@ BaseType_t task;
 #endif
     if (task != pdPASS) {
       ESP_LOGE(TAG, "Failed to create WiFi save task");
-      delete params;
-      httpd_req_async_handler_complete(reqCopy);
-      return sendJsonError(req, "Failed to create save task");
-    }
-
-    return ESP_OK;
-  }
-
-  if (ethernetEnabled) {
-    httpd_req_t* reqCopy = nullptr;
-    if (httpd_req_async_handler_begin(req, &reqCopy) != ESP_OK) {
-      return sendJsonError(req, "Failed to start save operation");
-    }
-
-    EthSaveParams* params = new EthSaveParams{
-      .req = reqCopy,
-      .instance = instance,
-      .setupCode = setupCode,
-      .hasSetupCode = hasSetupCode,
-      .cleaned_body_str = cleaned_body_str
-    };
-
-    BaseType_t task;
-#ifndef CONFIG_FREERTOS_UNICORE
-    task = xTaskCreatePinnedToCore(captivePortalEthSaveTask, "eth_save_task", 8192, params, 5, nullptr, 1);
-#else
-    task = xTaskCreate(captivePortalEthSaveTask, "eth_save_task", 8192, params, 5, nullptr);
-#endif
-    if (task != pdPASS) {
-      ESP_LOGE(TAG, "Failed to create Ethernet save task");
       delete params;
       httpd_req_async_handler_complete(reqCopy);
       return sendJsonError(req, "Failed to create save task");
@@ -3053,6 +2857,148 @@ const char *lockStateToName(int state) {
 }
 
 } // namespace
+
+/**
+ * @brief Report what the update page needs to render before it can ask for a password.
+ *
+ * Deliberately unauthenticated, like `/api/ha/info`: a client cannot be asked for a
+ * password before it knows what it is talking to, and everything here is already in the
+ * mDNS TXT record. It answers the two questions the UI cannot guess - whether a second
+ * slot exists at all, and how big it is - so the page can refuse an oversized file before
+ * uploading 1.7 MB over Wi-Fi.
+ */
+esp_err_t WebServerManager::handleOtaInfo(httpd_req_t *req) {
+  const esp_partition_t *running = esp_ota_get_running_partition();
+  const esp_partition_t *target = esp_ota_get_next_update_partition(nullptr);
+
+  JsonBuilder info = JsonBuilder::object();
+  info.addString("version", esp_app_get_description()->version);
+  info.addString("partition", running == nullptr ? "unknown" : running->label);
+  info.addString("slot", target == nullptr ? "" : target->label);
+  info.addNumber("slot_size", target == nullptr ? 0 : target->size);
+  info.addBool("ota_available", target != nullptr);
+  // Left at 0 on purpose: the running image's own size is not a compile-time constant and
+  // reading it back from the partition would report the size of the *installed* image, not
+  // the file the build just produced on the host. The page treats 0 as "unknown" and simply
+  // shows the size of the file the user picked.
+  info.addNumber("update_size", 0);
+
+  std::string body = info.toStringUnformatted();
+  httpd_resp_set_type(req, "application/json");
+  httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+  httpd_resp_send(req, body.c_str(), HTTPD_RESP_USE_STRLEN);
+  return ESP_OK;
+}
+
+/**
+ * @brief Install a firmware image streamed in the request body, then reboot into it.
+ *
+ * The build has no OTA page and no GitHub updater: the host-side update script is the
+ * only client, and this one request is the whole interface. It is POST-only, requires
+ * the Web UI credentials, and refuses to run over plain HTTP - an image is the most
+ * valuable thing a caller can send, and letting it cross the LAN in the clear would let
+ * anyone on the network read it and swap it for their own.
+ *
+ * The body is streamed straight into the inactive slot in 4 KiB chunks, so the image
+ * never has to exist in RAM. `esp_ota_end()` validates the image before the boot
+ * partition is switched, so a truncated or corrupt upload leaves the device running the
+ * firmware it already had.
+ */
+esp_err_t WebServerManager::handleOtaFirmware(httpd_req_t *req) {
+  WebServerManager *instance = getInstance(req);
+  if (instance == nullptr) {
+    httpd_resp_send_500(req);
+    return ESP_FAIL;
+  }
+  if (!instance->basicAuth(req)) {
+    return sendAuthFailure(req);
+  }
+  if (!instance->haRequireTls(req)) {
+    return ESP_OK;
+  }
+
+  const esp_partition_t *target = esp_ota_get_next_update_partition(nullptr);
+  if (target == nullptr) {
+    return sendJsonError(req, "This device has no inactive application slot to write to",
+                         "409 Conflict");
+  }
+  if (req->content_len <= 0) {
+    return sendJsonError(req, "Content-Length is required for a firmware upload",
+                         "411 Length Required");
+  }
+  if (static_cast<size_t>(req->content_len) > target->size) {
+    return sendJsonError(req,
+                         fmt::format("Image is {} bytes, slot '{}' holds only {}",
+                                     req->content_len, target->label, target->size),
+                         "413 Payload Too Large");
+  }
+
+  ESP_LOGI(TAG, "OTA: %u bytes into '%s'", static_cast<unsigned>(req->content_len),
+           target->label);
+
+  esp_ota_handle_t ota = 0;
+  esp_err_t err = esp_ota_begin(target, req->content_len, &ota);
+  if (err != ESP_OK) {
+    ESP_LOGE(TAG, "OTA: esp_ota_begin failed: %s", esp_err_to_name(err));
+    return sendJsonError(req, "Could not prepare the OTA slot",
+                         "500 Internal Server Error");
+  }
+
+  // Heap, never stack: the HTTP task has a 6 KiB stack on this codebase and a local
+  // buffer of this size is the classic "request reboots the device with no response".
+  std::vector<char> chunk(4096);
+  size_t remaining = static_cast<size_t>(req->content_len);
+  while (remaining > 0) {
+    const size_t want = remaining < chunk.size() ? remaining : chunk.size();
+    const int received = httpd_req_recv(req, chunk.data(), want);
+    if (received == HTTPD_SOCK_ERR_TIMEOUT) {
+      continue;
+    }
+    if (received <= 0) {
+      esp_ota_abort(ota);
+      ESP_LOGE(TAG, "OTA: upload interrupted after %u of %u bytes",
+               static_cast<unsigned>(req->content_len - remaining),
+               static_cast<unsigned>(req->content_len));
+      return sendJsonError(req, "The upload was interrupted",
+                           "500 Internal Server Error");
+    }
+    if (esp_ota_write(ota, chunk.data(), static_cast<size_t>(received)) != ESP_OK) {
+      esp_ota_abort(ota);
+      ESP_LOGE(TAG, "OTA: flash write failed");
+      return sendJsonError(req, "Could not write the image to flash",
+                           "500 Internal Server Error");
+    }
+    remaining -= static_cast<size_t>(received);
+  }
+
+  err = esp_ota_end(ota);
+  if (err != ESP_OK) {
+    ESP_LOGE(TAG, "OTA: image rejected: %s", esp_err_to_name(err));
+    return sendJsonError(req, "The uploaded image is not a valid firmware image",
+                         "400 Bad Request");
+  }
+
+  err = esp_ota_set_boot_partition(target);
+  if (err != ESP_OK) {
+    ESP_LOGE(TAG, "OTA: esp_ota_set_boot_partition failed: %s", esp_err_to_name(err));
+    return sendJsonError(req, "Could not switch the boot partition",
+                         "500 Internal Server Error");
+  }
+
+  ESP_LOGW(TAG, "OTA: installed into '%s', rebooting", target->label);
+  const std::string body = JsonBuilder::object()
+                               .addBool("success", true)
+                               .addString("message", "Firmware installed; rebooting")
+                               .addString("partition", target->label)
+                               .toStringUnformatted();
+  httpd_resp_set_type(req, "application/json");
+  httpd_resp_send(req, body.c_str(), HTTPD_RESP_USE_STRLEN);
+
+  // Let the response reach the socket before the reboot drops the network.
+  vTaskDelay(pdMS_TO_TICKS(750));
+  esp_restart();
+  return ESP_OK;
+}
 
 bool WebServerManager::haRequireTls(httpd_req_t *req) const {
   if (m_tlsActive.load(std::memory_order_relaxed)) {

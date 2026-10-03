@@ -1,14 +1,14 @@
 idf_component_register(SRCS "main.cpp" "app_events.cpp" "app_event_loop.cpp" "ConfigManager.cpp" "ReaderDataManager.cpp"
                     "HardwareManager.cpp" "HomeKitLock.cpp" "LockManager.cpp"
-                    "MqttManager.cpp" "HKServices.cpp" "NfcManager.cpp" "Pn532Reader.cpp" "Pn7160Reader.cpp" "St25r3916Reader.cpp" "WebServerManager.cpp" "WebSocketLogSinker.cpp"
-                    "ConsoleLogSinker.cpp" "GPIOAllocator.cpp" "EthernetDriver.cpp"
+                    "MqttManager.cpp" "HKServices.cpp" "NfcManager.cpp" "Pn532Reader.cpp" "WebServerManager.cpp" "WebSocketLogSinker.cpp"
+                    "ConsoleLogSinker.cpp" "GPIOAllocator.cpp"
                     "HouseholdManager.cpp" "NodeIdentityManager.cpp" "ProvisioningManager.cpp"
                     "SecurityManager.cpp" "AuditManager.cpp" "HealthManager.cpp"
                     "GuestTagManager.cpp" "NtagCardIo.cpp"
                     "BackupManager.cpp" "RestoreManager.cpp" "DeviceCert.cpp"
                     "DiscoveryAdvertiser.cpp" "OTARollbackCompat.cpp"
                     INCLUDE_DIRS "include"
-                    PRIV_REQUIRES HomeSpan pn532_hal pn7160 DigitalDoorKey esp_https_server mqtt libsodium
+                    PRIV_REQUIRES HomeSpan pn532_hal DigitalDoorKey esp_https_server mqtt libsodium
                     msgpack-c json loggable loggable_espidf esp_wifi dns_server esp_http_client
                     mdns)
 

@@ -138,7 +138,6 @@ private:
   // HTTP Route Handlers (Static)
   // ------------------------------------------------------------------------
   static esp_err_t handleGetConfig(httpd_req_t *req);
-  static esp_err_t handleGetEthConfig(httpd_req_t *req);
   static esp_err_t handleGetNfcPresets(httpd_req_t *req);
   static esp_err_t handleClearConfig(httpd_req_t *req);
   static esp_err_t handleSaveConfig(httpd_req_t *req);
@@ -185,6 +184,11 @@ private:
   static esp_err_t handleHaGuestRevoke(httpd_req_t *req);
   static esp_err_t handleHaGuestCancel(httpd_req_t *req);
 
+  // Firmware update. There is no separate update page server: the Web UI page and the
+  // host-side update script are the only clients, so this is one info read and one POST.
+  static esp_err_t handleOtaInfo(httpd_req_t *req);
+  static esp_err_t handleOtaFirmware(httpd_req_t *req);
+
   /**
    * @brief Refuse an API call when the transport is not encrypted.
    *
@@ -218,7 +222,6 @@ private:
   static esp_err_t handleHttpRedirect(httpd_req_t *req);
 
   static void captivePortalSaveTask(void* pvParameters);
-  static void captivePortalEthSaveTask(void* pvParameters);
   static esp_err_t handleCaptivePortal(httpd_req_t *req);
   static esp_err_t handleGetCaptivePortalConfig(httpd_req_t *req);
   static esp_err_t handleSaveCaptivePortalConfig(httpd_req_t *req);

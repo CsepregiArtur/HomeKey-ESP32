@@ -5,10 +5,19 @@ weight: 12
 
 # Single-slot layout (no OTA)
 
+> [!NOTE]
+> **This is no longer the active layout.** The device is back on the dual-slot
+> table `with_ota.csv` so it can be updated over the network — see
+> **[Updating firmware](updates)**. This page is kept because `no_ota.csv` is
+> still in the tree: it trades the ability to update over the air for ~47
+> percentage points of application-partition headroom (roughly 8% free in
+> dual-slot, ~55% free here), and moving between the two is a serial flash in
+> either direction.
+
 This page is the plan and the migration procedure for the change from a
-dual-slot (OTA) flash layout to a **single application slot**. It is a
-**one-way door for the node**: after it, a device can no longer update itself
-over the air, and the change itself cannot be delivered over OTA either.
+dual-slot (OTA) flash layout to a **single application slot**. The change itself
+cannot be delivered over OTA: the old partition table is what describes where an
+image may be written, and it does not know about the new slots.
 
 ## Why
 

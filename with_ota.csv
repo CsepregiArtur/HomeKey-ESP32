@@ -1,16 +1,36 @@
-# Name,   Type, SubType, Offset,   Size, Flags
+# Name,   Type, SubType, Offset,   Size,     Flags
+#
+# Dual-slot (OTA) layout for the 4 MB ESP32, with `nvs` left at the size the
+# single-slot layout gave it.
+#
+# Switching back from `no_ota.csv` must not orphan credentials. NVS is a
+# log-structured store that only moves forward: entries written since the
+# partition grew may sit anywhere in those 92 KiB, so shrinking it back to
+# 24 KiB could silently lose Wi-Fi credentials, HomeKit pairing or reader
+# enrolment. `nvs` therefore keeps its offset AND its size, and the cost is
+# paid by the application slots (1856 KiB each instead of 1920 KiB).
+#
+#   region           no_ota.csv (single slot)      this file (dual slot)
+#   ---------------  ----------------------------  -------------------------
+#   nvs               0x9000   92 KiB               0x9000   92 KiB (unchanged)
+#   otadata           (none)                       0x20000   8 KiB
+#   app0 / OTA slot   0x20000  3840 KiB (factory)   0x30000  1856 KiB (ota_0)
+#   app1 / 2nd slot   (none)                       0x200000 1856 KiB (ota_1)
+#   spiffs            0x3E0000 128 KiB              0x3E0000 128 KiB (unchanged)
+#
+# Two holes are deliberate and unavoidable: app partitions must start on a
+# 64 KiB boundary, so the slot after `otadata` begins at 0x30000 (0x22000-0x30000
+# is unusable), and a 64 KiB tail before `spiffs` is left for the same reason
+# (0x1D0000 is exactly 29 x 64 KiB).
+#
+# Both data partitions keep their offsets, so a device can be moved between this
+# table and `no_ota.csv` without losing NVS or the UI. Validate with:
+#   python $IDF_PATH/components/partition_table/gen_esp32part.py with_ota.csv
 #
 # Plain, reversible layout: no flash encryption, no Secure Boot, no NVS
-# encryption. The partition table is back at the ESP-IDF default 0x8000 and
-# there is no `nvs_keys` partition.
-#
-# When the Path 2 security rollout is done (see
-# docs/content/PATH2_SECURITY_ROLLOUT.md) this file gains an `nvs_keys`
-# partition marked `encrypted` and the table moves to 0xD000 to leave room for
-# the larger signed bootloader. That change is one-way and requires re-flashing
-# already-deployed devices over serial.
-nvs,data,nvs,0x9000,0x6000,,
-otadata,data,ota,0xF000,0x2000,,
-app0,app,ota_0,0x20000,0x1E0000,,
-app1,app,ota_1,0x200000,0x1E0000,,
-spiffs,data,spiffs,0x3E0000,0x20000,,
+# encryption, and the table at the ESP-IDF default 0x8000.
+nvs,      data, nvs,     0x9000,  0x17000,
+otadata,  data, ota,     0x20000, 0x2000,
+app0,     app,  ota_0,   0x30000, 0x1D0000,
+app1,     app,  ota_1,   0x200000,0x1D0000,
+spiffs,   data, spiffs,  0x3E0000,0x20000,

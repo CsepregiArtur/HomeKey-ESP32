@@ -1,228 +1,211 @@
 ---
-title: "Updates"
+title: "Updating firmware"
 weight: 5
 ---
 
-# Keeping Your HomeKey-ESP32 Fresh!
+# Updating firmware
 
-> [!IMPORTANT]
-> **There is no over-the-air firmware update any more. Firmware is installed over serial only.**
->
-> The device uses a single-slot flash layout (`no_ota.csv`): one `factory` application
-> partition instead of two OTA slots, and no `otadata`. The freed space went to the
-> application (3.3% free → 53% free) and to `nvs` (24 KiB → 92 KiB). Guidance below that
-> describes updating over the network, from the Web UI or from GitHub no longer applies.
->
-> A partition table cannot be delivered over the air - the node writes a new image into a
-> slot that the *old* table describes - so moving an existing device onto this layout needs
-> one serial flash. See **[Single-slot layout](single_slot_layout)**.
+The device uses a **dual-slot** layout (`with_ota.csv`): two application
+partitions, `ota_0` and `ota_1`, plus an `otadata` partition that records which
+one to boot. An update is written into the slot the device is *not* running
+from, so the running firmware is never overwritten while it is executing.
 
-This document outlines different methods for updating the firmware on your HomeKey-ESP32 device. Keeping your device up-to-date ensures you have the latest features, bug fixes, and security enhancements.
+There are two ways to install an image, and they are not interchangeable.
 
-> [!NOTE]
-> If you are satisfied with your current setup, you probably don't need to update your firmware.
->
-> However, if you're interested in what the new version brings, this guide is for you.
+| | Over the cable | Over the network |
+|---|---|---|
+| Writes the partition table | **yes** | no |
+| Writes the bootloader | **yes** | no |
+| Writes the web UI filesystem | **yes** | no |
+| Works on a device that has never been OTA-flashed | **yes** | no |
+| Can update several devices in one run | one at a time | yes |
+| Needs physical access | yes | no |
 
-## Security hardening is available but not enabled
+**Moving an existing device onto this layout needs one serial flash.** A
+partition table cannot be delivered over the air: the old table is what tells
+the device where to write the new image, and it does not describe the new slots.
+After that one cable, every later firmware update can be wireless.
 
-Version `0.10.0` (this fork) **implements** flash encryption, Secure Boot V1 and NVS
-encryption, but ships with them **disabled** so the board stays fully reversible.
-Nothing is destroyed on upgrade and no eFuses are burned.
+## The layout, and why `nvs` did not shrink
 
-Enabling the hardening is a **separate, deferred, one-way decision**. If and when you
-take it, these consequences apply:
+| Partition | Offset | Size | |
+|---|---|---|---|
+| `nvs` | 0x9000 | 92 KiB | unchanged from the single-slot layout |
+| `otadata` | 0x20000 | 8 KiB | which slot to boot |
+| `app0` (`ota_0`) | 0x30000 | 1856 KiB | |
+| `app1` (`ota_1`) | 0x200000 | 1856 KiB | |
+| `spiffs` | 0x3E0000 | 128 KiB | the web UI filesystem |
 
-* **OTA is not possible from an older build.** The partition table moves to `0xD000`, an `nvs_keys` partition is added and the app partitions are realigned, so a network update will not boot. **A serial flash (`idf.py flash` / `esptool`) is required.**
-* **Existing device data is erased.** Wi-Fi credentials, HomeKit pairing and HomeKey reader enrolment stored on the device are lost when the flash is first encrypted; the device must be re-provisioned from scratch.
-* **Every future image must be signed.** Generate a Secure Boot signing key once and keep it safe - losing it means the device can no longer be updated:
+`nvs` keeps the **size and offset** the single-slot layout gave it instead of
+going back to 24 KiB. NVS is a log-structured store that only moves forward:
+entries written since the partition grew may sit anywhere in those 92 KiB, so
+shrinking it back could silently drop Wi-Fi credentials, HomeKit pairing or
+reader enrolment. The 68 KiB that buys comes out of the application slots, which
+are 1856 KiB each instead of 1920 KiB.
 
-  ```bash
-  espsecure.py generate_signing_key --version 1 keys/secure_boot_signing_key.pem
-  ```
+Two small holes are unavoidable: application partitions must start on a 64 KiB
+boundary, so the slot after `otadata` begins at 0x30000 and a 64 KiB tail before
+`spiffs` cannot be used.
 
-* **Back up first.** Export the household recovery secret and note your configuration before upgrading.
+Measure it yourself with:
 
-Do not improvise this. Follow
-**[Security Rollout Plan: Path 1 → Path 2](PATH2_SECURITY_ROLLOUT)**, which stages the
-changes (flash encryption → NVS encryption → Secure Boot → release mode) and verifies
-each one on hardware before the next.
-* **Flash with the right path.** If the device is built with flash encryption enabled, `idf.py flash` writes a plaintext image and the app can boot-loop with `Flash encryption eFuse bit was not enabled in bootloader but CONFIG_SECURE_FLASH_ENC_ENABLED is on`. Once a key is actually burned, plaintext re-flashing and `idf.py encrypted-app-flash` are the supported routes in Development mode. See [Security](security) for the details.
+```bash
+python "$IDF_PATH/components/partition_table/gen_esp32part.py" with_ota.csv
+```
 
-### Pick a path before you flash
+## Safety: rollback
 
-This fork currently ships with flash encryption and Secure Boot **disabled**
-("Path 1") so that the board stays fully reversible while the firmware is
-validated. Enabling them is **Path 2**, a deferred one-way rollout.
+`CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y`. A freshly installed image is marked
+*pending verify*, and the bootloader abandons it for the previous slot unless the
+running image confirms itself. `setup()` in `main/main.cpp` confirms once
+HomeKit, the web server and the reader are all up, so an image that crashes
+before that point is rolled back instead of kept. **Without that confirmation an
+update would appear to succeed and then silently revert on the next power cycle.**
 
-| Path | What it does | Reversible? |
-| --- | --- | --- |
-| **Path 1 — current** | No eFuses burned, no encryption. Behaves like upstream; plaintext flashing works normally. | ✅ Yes |
-| **Path 2 — deferred** | Burns the eFuses, encrypts the flash, Secure Boot locks the device to your signing key. Encrypted + signed images only. | ❌ **Permanent** |
+The cost is honest: a device that boots a *good* image but fails later - a
+watchdog reset in `loop()`, say - is still rolled back, and the update looks like
+it never happened. Check the boot log's `Running partition` line after an update
+to see which slot is live.
 
-See **[Security Rollout Plan: Path 1 → Path 2](PATH2_SECURITY_ROLLOUT)** for the
-staged procedure, prerequisites and irreversible consequences, and
-[Security](security#choosing-how-to-enable-it-path-1-or-path-2) for the config
-options.
+## 1. From the Web UI
 
-**Required Files for Updates:**
+**Update** in the navigation menu. The page reports the running version, which
+partition it booted from, and the size of the application slot, then takes a
+`.bin` file and installs it.
 
-*   `*.firmware.bin`: The main application firmware file.
-*   `littlefs.bin`: Contains the web interface files (LittleFS filesystem).
+The page sends the image in a single request and shows upload progress, because
+1.7 MB over Wi-Fi takes long enough that a silent bar looks like a hang. On
+success the device reboots into the new image after about a second.
+
+The page needs **HTTPS** and refuses over plain HTTP with an explanatory message.
+An image is the most valuable thing a caller can send, and letting it cross the
+LAN in the clear would let anyone on the network read it and swap it for their
+own.
+
+## 2. From the command line
+
+`scripts/ota_update.py` drives both paths and is the way to update several
+devices at once.
+
+```bash
+./scripts/ota_update.py                 # discover, ask, update
+./scripts/ota_update.py --list          # just show what was found
+./scripts/ota_update.py --port /dev/cu.usbmodem1101 --with-fs
+./scripts/ota_update.py --prepare-for-ui
+```
+
+With no arguments it looks for an attached device first. If it finds one it
+offers to flash over the cable; otherwise it discovers devices over mDNS and asks
+which to update - one of them, or all of them.
+
+### Preparing a file for the web UI
+
+Passing `--prepare-for-ui`, or answering yes when the script asks, copies the
+built image to `homekey-ota-<size>-0x30000.bin` next to a `.sha256` sidecar file.
+
+```bash
+./scripts/ota_update.py --prepare-for-ui
+```
+
+The number in the name is the `app0` offset from `with_ota.csv`. It exists because
+a build output that is correct for `esptool write_flash` and one that is correct
+for the web UI's file picker are the same bytes under different names, and
+choosing the wrong `.bin` by hand is an easy mistake that only shows up as a
+failed install. These files are gitignored.
+
+### Where the password lives
+
+The device's Web UI password is read from the macOS Keychain, service
+`homekey-esp32-ota`, account `web-ui`. If it is not there the script asks for it
+once and stores it. It is never written to a file, and never printed.
+
+```bash
+./scripts/ota_update.py --forget-password           # delete it
+./scripts/ota_update.py --keychain-account other    # use a different account
+```
+
+`--password` exists for scripting but shows up in the process list; prefer the
+Keychain.
+
+### What it verifies
+
+- **The certificate is pinned to the device's advertised fingerprint.** The
+  device's certificate is self-signed with `CN=HK` and a fixed validity (it is
+  generated on a device with no clock, at an address that changes with DHCP), so
+  neither the CA chain nor the hostname can be checked. The SHA-256 of the
+  certificate is checked immediately after the handshake, before anything is
+  sent, and a mismatch aborts. That is the actual verification, and it is what
+  makes discovery safe: a device that answers must present the expected
+  certificate.
+- **The image fits.** The size is compared with the `app0` size before anything
+  is uploaded, so an oversized image fails in a second instead of after a minute
+  of Wi-Fi.
+- **Every secret is masked before printing.** Anything printed from a device's
+  JSON passes through a redactor that replaces values whose key contains
+  `password`, `passwd`, `secret`, `token` or `psk`.
+
+### Known limitation
+
+`dns-sd`, macOS's mDNS client, frequently produces no output when its stdout is
+not a terminal. When that happens discovery falls back to probing a short list of
+addresses in the same /24, and only hosts running this device's update endpoint
+answer at all. If neither finds anything, pass `--port` and use the cable.
+
+## 3. From a build
+
+```bash
+source ~/esp/esp-idf/export.sh
+export CI=true CMAKE_POLICY_VERSION_MINIMUM=3.5
+(cd data && npm install && npm run build && find dist \( -name '*.css' -o -name '*.js' \) -delete)
+idf.py build
+./scripts/ota_update.py --port /dev/cu.usbmodemXXXX --with-fs   # first time
+./scripts/ota_update.py                                         # after that
+```
+
+`idf.py flash` and `esptool.py` still work directly; the offsets for the current
+table are printed by the build, or read them from `with_ota.csv`.
+
+## Going back to a single slot
+
+`no_ota.csv` is still in the tree. It gives one 3840 KiB `factory` application
+slot and no `otadata`, which is ~55% free instead of the ~8% the dual-slot layout
+leaves, and removes the ability to update over the network entirely.
+
+Switching back is another serial flash, and `nvs` and `spiffs` keep their offsets
+in both tables, so credentials and the UI survive it. Change
+`CONFIG_PARTITION_TABLE_CUSTOM_FILENAME` in `sdkconfig.defaults` and
+`board_build.partitions` in `platformio.ini`, then reflash the bootloader and the
+partition table.
 
 ## Which version am I running?
 
-Three places report it, and they agree:
-
-* **Web UI → OTA** shows the firmware version as `Current Version`.
-* **Web UI → device info** shows the firmware version and the UI (web interface) version.
-* **Apple Home → accessory settings** shows the firmware revision.
+| Where | Shows |
+|---|---|
+| Web UI → Update | firmware version, and which partition booted |
+| Web UI → Info | firmware version and UI version |
+| Apple Home → accessory settings | firmware revision |
+| Boot log | `Running partition` line |
 
 How to read the value:
 
 | Value | Meaning |
-| --- | --- |
-| `v0.10.0` | A tagged release. |
-| `0.10.0-dev+1a2b3c4` | Built from a branch, `0.10.0` being the version it is based on and `1a2b3c4` the exact commit. |
-| `0.10.0-dev+1a2b3c4-dirty` | Same, but the worktree had uncommitted changes - not a release. |
+|---|---|
+| `v0.11.0` | a tagged release |
+| `0.11.0-dev+1a2b3c4` | built from a branch, at that commit |
+| `0.11.0-dev+1a2b3c4-dirty` | as above, with uncommitted changes - not a release |
 
-The UI version is reported separately as `<app version>+<commit>` (for example `0.10.0+1a2b3c4`), because the web interface can be updated on its own.
+> **Version reporting caveat.** `HK_APP_VERSION` in the root `CMakeLists.txt`
+> only reaches the image when the tree is not descended from a tag; otherwise the
+> build reports `git describe --tags`. Bumping the constant is not enough on its
+> own.
 
-## 1. Over-The-Air (OTA) Updates
+## Troubleshooting
 
-The primary method for Over-The-Air (OTA) updates is through the WebUI. This allows you to update your device wirelessly.
-
-### 1.1. WebUI Updates
-
-> [!NOTE]
-> This is available starting with version `v0.7`.
-
-The easiest way to update your device is through the web interface. Simply navigate to the device's IP address in your web browser and navigate to the "OTA Update" page.
-
-1.  **Access the Web Interface:** Navigate to the device's IP address in your web browser.
-2.  **Navigate to OTA Update section:** Click the "OTA Update" button on the left-hand side of the page.
-3.  **Select Firmware File:** Select the `*-firmware.bin` file you downloaded earlier.
-4.  **Select LittleFS File:** Select the `littlefs.bin` file you downloaded earlier.
-5.  **Flash Firmware and LittleFS:** Click the "Upload Both" button to initiate the update process.
-6.  **Reboot:** The device will automatically reboot after the OTA process is complete.
-
-If everything went smoothly, you should see the "Current Version" and "Running Partition" fields update (once it reconnected) to reflect the new firmware version and partition.
-
-### 1.2. `espota` Updates
-
-### 1.2.1. Requirements
-
-*   Your HomeKey-ESP32 device connected to your Wi-Fi network.
-*   `espota` tool (available as a Windows executable or a Python script for Linux/macOS, both available [here](https://github.com/espressif/arduino-esp32/tree/master/tools)).
-*   The `*-firmware.bin` file for your ESP32 chip (e.g., `esp32-firmware.bin`, `esp32c3-firmware.bin`, or `esp32s3-firmware.bin`) from the [GitHub Releases page](https://github.com/rednblkx/HomeKey-ESP32/releases).
-*   The `littlefs.bin` file from the [GitHub Releases page](https://github.com/rednblkx/HomeKey-ESP32/releases).
-*   The IP address of your HomeKey-ESP32 device.
-*   (Optional) The OTA password, if you've set one in the [Configuration Guide](../configuration#524-homespan-settings).
-    *   The shipped default (`homespan-ota`) is treated as "not configured": the `espota` service is **disabled** until you set your own password under `Misc → HomeSpan`. This is intentional, because that service accepts firmware uploads over the network and the default password is public. The boot log states this explicitly.
-    *   If `espota` reports "No response from Device", check that a custom OTA password is set.
-
-### 1.2.2. Update
-
-1.  **Download `espota`:** Get the `espota` tool from the provided link.
-2.  **Open Terminal/Command Prompt:** Navigate to the directory where you downloaded `espota` and your firmware files.
-3.  **Flash Firmware:** Use the following command to flash the main firmware:
-    *   **Windows:**
-        ```bash
-        espota.exe -r -i <address_of_device> -a <ota_password> -f <esp32xx-firmware.bin>
-        ```
-    *   **Linux/macOS:**
-        ```bash
-        python espota.py -r -i <address_of_device> -a <ota_password> -f <esp32xx-firmware.bin>
-        ```
-    *   Replace `<address_of_device>` with your device's IP address, `<ota_password>` with your OTA password (if set), and `<esp32xx-firmware.bin>` with the path to your `*-firmware.bin` file.
-4.  **Flash LittleFS:** After the firmware is flashed, you must flash the `littlefs.bin` file using a similar command, but with the `-s` flag added:
-    *   **Windows:**
-        ```bash
-        espota.exe -r -i <address_of_device> -a <ota_password> -f <littlefs.bin> -s
-        ```
-    *   **Linux/macOS:**
-        ```bash
-        python espota.py -r -i <address_of_device> -a <ota_password> -f <littlefs.bin> -s
-        ```
-5.  **Reboot:** The device will automatically reboot after the OTA process is complete.
-
-## 2. Manual Update via USB (`esptool.py`)
-
-If OTA updates aren't working, or if you prefer a wired connection, you can always update your device via USB using `esptool.py`. This method is similar to the initial flashing process.
-
-### 2.1 Requirements
-
-*   Your HomeKey-ESP32 device.
-*   A USB cable to connect your ESP32 to your computer.
-*   `esptool.py` installed on your computer (see [Prerequisites Guide](../prerequisites/#1-essential-software)).
-*   The `esp32XX-firmware.bin` and `littlefs.bin` files.
-
-### 2.2. Update
-
-1.  **Connect ESP32:** Connect your ESP32 development board to your computer using a USB cable.
-2.  **Identify Serial Port:** Find the serial port your ESP32 is connected to (refer to [Setup Guide](../setup#3-flash-the-firmware) for details).
-3.  **Open Terminal/Command Prompt:** Navigate to the directory where you downloaded the `esptool.py` script and your firmware files.
-
-4.  **Flash Firmware and LittleFS Separately (Advanced):**
-    If you need to flash the application and filesystem separately (e.g., for specific development or recovery scenarios), use the following command. **Note the different flash addresses.**
-
-    ```bash
-    esptool.py --port YOUR_PORT write_flash 0x20000 <firmware.bin> 0x200000 <firmware.bin> 0x3e0000 <littlefs.bin>
-    ```
-    *   Replace `<firmware.bin>` and `<littlefs.bin>` with the paths to your respective files.
-    *   Replace `YOUR_PORT` with your serial port assigned to your ESP32.
-
-5.  **Initiate Flash Mode:** If the flashing doesn't start automatically, you might need to manually put your ESP32 into flash mode (refer to [Setup Guide](../setup#3-flash-the-firmware) for details).
-6.  **Wait for Completion:** The flashing process will take a few moments. Once complete, you'll see a "Hash of data verified" message.
-7.  **Reboot:** Disconnect and reconnect your ESP32 from USB to reboot the device.
-
-## 3. Important Notes on Updates
-
-*   **Check Release Notes:** Always check the release notes on the [GitHub Releases page](https://github.com/rednblkx/HomeKey-ESP32/releases) before updating. These notes will inform you about new features, bug fixes, and any potential breaking changes or special migration steps required between versions.
-*   **Power Stability:** Ensure a stable power supply during the update process. Interrupting power during a flash can corrupt the firmware and require a full re-flash via USB.
-*   **Web UI login:** devices set up from a version that generates its own credentials ask for a username and password on the Web UI. The credentials are shown when the setup portal saves the Wi-Fi configuration and again in the boot log; see [Security]({{< ref "security" >}}) for what to do if they are lost.
-*   **Signed OTA images (optional):** releases can be built so the device only accepts signature-verified OTA images. That needs a signing key, so it is off by default - see [Security]({{< ref "security" >}}).
-
-## 4. Breaking changes
-
-These affect how an existing device is updated or accessed. None of them requires re-pairing, and none of them touches a device's stored configuration.
-
-### 4.1. Update the firmware before the filesystem image
-
-The web UI assets are brotli-compressed from this version on, because they no longer fit into the 128 kB filesystem partition as gzip. The firmware serves brotli, gzip or uncompressed assets - whichever the flashed image contains - so:
-
-* **Firmware first, then the filesystem image**: works. This is the recommended order.
-* **Filesystem image only, on older firmware**: the web UI will not load, because older firmware only looks for `.gz` assets. Recovery needs USB.
-* **Firmware only, on an older filesystem image**: works; gzip assets are still served.
-
-### 4.2. New devices ask you to choose their credentials
-
-**What changed:** a device that has never been configured no longer generates credentials and prints them to the serial log. Instead it comes up with Web UI authentication **off** and shows a blocking **first-run setup** screen, where you choose your own Web UI username and password, HomeKit Setup Code, OTA password and setup AP password.
-
-**Why:** the old values were printed **once**, during the hard reset that `idf.py flash` performs - before a monitor can attach - so they were easy to miss, and a missed setup AP password could only be recovered by dumping flash. Choosing the values removes that trap and means nothing has to be logged.
-
-**What to do:** after the device joins your network, open its Web UI and complete the setup screen. Until you save it the Web UI has **no login**, so only do this on a trusted network.
-
-**If a credential is lost:** see [Recovering from a lost credential]({{< ref "security" >}}) - the setup portal does not require a login, and erasing NVS returns the device to the first-run screen. Devices that are already configured are unaffected and keep their stored values.
-
-While a new device has no network it may show two access points - its own `HK_XXXXXX` captive portal and HomeSpan's `HomeSpan-Setup`. Both use the setup AP password, which is `HomeKey$123$` until you set your own on the setup screen.
-
-### 4.3. `espota` is off until an OTA password is set (security default change)
-
-**What changed:** the `espota` service no longer starts while the OTA password is empty or still the shipped default (`homespan-ota`), because that password is public and the service accepts firmware uploads over the network.
-
-**Who is affected:** anyone who updates over the network with `espota` (Arduino-IDE style) instead of through the Web UI. The Web UI firmware uploader is unaffected.
-
-**Fix (one line of configuration):** `Web UI → Misc → HomeSpan → OTA Password` → set an OTA password → save. The device reboots, and `espota` accepts that password from then on.
-
-### 4.4. State-changing endpoints are POST-only
-
-`/reset_hk_pair`, `/reset_wifi_cred` and `/start_config_ap` reject GET requests now. The Web UI sends POST; scripts that used GET need updating.
-
-### 4.5. Requests must use the device's IP address or its mDNS name
-
-The `Host` header is validated to block DNS rebinding, so reaching the Web UI through a custom host name, a reverse proxy or a hostname alias returns 401. Use the device's IP address or `<hostname>.local`.
-
----
-
-Keeping your HomeKey-ESP32 updated is key to a smooth and secure smart home experience. Happy updating!
+| Symptom | Cause |
+|---|---|
+| Update page says HTTPS is required | Enable HTTPS under Misc → Security. The endpoint refuses plain HTTP on purpose. |
+| `401` from the script | The Keychain password does not match the device. `--forget-password`, then run again. |
+| Upload starts, then the connection drops | Wi-Fi interference, or the device rebooting mid-write. An interrupted upload is **not** applied; the device is still on the firmware it had. |
+| Device reboots but runs the old version | The new image did not confirm itself and was rolled back. Check the boot log for a panic before the confirmation point. |
+| Device reboots in a loop | It is in the OTA slot and failing before confirming. Flash over the cable; the previous image is in the other slot. |
+| `single-slot firmware, nothing to update into` | The device is on `no_ota.csv`. It needs one serial flash first. |

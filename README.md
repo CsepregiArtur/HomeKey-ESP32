@@ -51,7 +51,10 @@ in [`docs/content/fork-vs-upstream.md`](docs/content/fork-vs-upstream.md).
 | Provisioning | — | Single-use, expiring, replay-protected join codes |
 | MQTT | Single-device legacy topics | **Additive** household namespace + HA discovery |
 | MQTT lock/unlock | Plain numeric payloads | **HMAC-SHA256 authenticated** commands |
-| Web UI | Misc, MQTT, OTA, Logs, Actions | **+ household, node, health, security, audit, backup, recovery, provision**; OTA page **removed** (no over-the-air update) |
+| Web UI | Misc, MQTT, OTA, Logs, Actions | **+ household, node, health, security, audit, backup, recovery, provision, update** |
+| Firmware update | OTA from the Web UI + GitHub | **OTA over the LAN** (dual-slot, with rollback) or **serial**; no GitHub updater, no UI-less device required |
+| Connectivity | Wi-Fi, Ethernet | **Wi-Fi only** (Ethernet driver removed) |
+| NFC readers | PN532, PN7160, ST25R3916 | **PN532 only** (the other two were removed to make room for the second OTA slot) |
 | Audit log | — | Bounded 256-record log |
 | **Flash encryption** | **Disabled** (deliberate) | **Supported** — currently off, AES-256 eFuse key when enabled |
 | **Secure Boot** | **Disabled** | **Supported** — currently off, V1 (ECDSA-P256) when enabled |
@@ -89,8 +92,7 @@ The project aims to be the easy DIY solution for using Apple's HomeKey feature w
 >   enrolment stored on the device **are lost and cannot be recovered**.
 > - The partition layout changes (`nvs_keys` added, partition table moved to
 >   `0xD000`, app offsets realigned), so firmware from an older build cannot be
->   installed by any route but a serial flash — and there is no OTA path on the
->   current single-slot layout in any case.
+>   installed by any route but a serial flash.
 > - Every future firmware image must be signed with the Secure Boot key; you can
 >   no longer flash arbitrary unsigned binaries.
 > - The flash-encryption key and the signing key must both be backed up

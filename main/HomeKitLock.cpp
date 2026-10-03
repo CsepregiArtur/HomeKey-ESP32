@@ -1,9 +1,7 @@
 #include "HardwareManager.hpp"
-#include "EthernetDriver.hpp"
 #include "fmt/ranges.h"
 #include "config.hpp"
 #include "esp_log.h"
-#include "eth_structs.hpp"
 #include "eventStructs.hpp"
 #include "HomeKitLock.hpp"
 #include <cstdint>
@@ -76,16 +74,12 @@ HomeKitLock::HomeKitLock(std::function<void(int)> &conn_cb, LockManager& lockMan
 }
 
 /**
- * @brief Initializes the Ethernet subsystem according to saved configuration.
+ * @brief Ethernet is not part of this build.
  *
- * Delegates to EthernetDriver::start(), which owns the ethernet event handler,
- * GPIO allocation, and driver bring-up. See EthernetDriver.cpp for the
- * observable behaviours.
+ * Kept as an empty hook so the HomeSpan status callback that calls it stays a single
+ * code path. The Ethernet driver, its configuration and its UI were removed with it.
  */
-void HomeKitLock::initializeETH() {
-  const auto& miscConfig = m_configManager.getConfig<espConfig::misc_config_t>();
-  EthernetDriver::start(miscConfig);
-}
+void HomeKitLock::initializeETH() {}
 /**
  * @brief Initialize HomeSpan, expose lock-related accessories/services, and register runtime callbacks.
  *

@@ -558,6 +558,16 @@ void setup() {
   // status callback starts the web server and is what gives the API a port to advertise.
   discoveryAdvertiser.begin(configManager, *nodeIdentityManager, webServerManager);
   pollHS = true;
+
+  // A freshly installed OTA image boots in PENDING_VERIFY, and the bootloader rolls it
+  // back on the next reset unless the running image confirms itself. Reaching the end of
+  // setup() means HomeKit, the web server and the readers all came up, which is the right
+  // moment to confirm: an image that crashes before this point is abandoned rather than
+  // kept. Without this call an update would appear to work and then silently revert on
+  // the first power cycle.
+#if CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE
+  homeSpan.markSketchOK();
+#endif
 }
 /**
  * @brief Run the main application loop: service HomeSpan events and yield to the RTOS.
