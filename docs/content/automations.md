@@ -1,6 +1,6 @@
 ---
 title: "HASS Automations"
-weight: 6
+weight: 12
 ---
 
 ## Examples

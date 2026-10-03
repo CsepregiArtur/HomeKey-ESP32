@@ -22,12 +22,16 @@ You are currently viewing the documentation for the **bleeding edge** (`main` br
 | Backup | — | **Encrypted + signed** household backup |
 | MQTT | Legacy topics | **+ household namespace** and HA discovery |
 | MQTT lock/unlock | Plain numeric payloads | **HMAC-SHA256 authenticated** |
-| Web UI | Misc, MQTT, OTA, Logs | **+ household, node, health, security, audit, backup, recovery, provision**; the OTA page is **removed** (no over-the-air update) |
+| Home Assistant | MQTT discovery only | **+ a custom component** (`homekey_household`) with a **broker-less, certificate-pinned HTTPS transport** |
+| Web UI | Misc, MQTT, OTA, Logs | **+ household, node, health, security, audit, backup, recovery, provision, guest tags, update**; the Ethernet settings are **removed** |
+| **Connectivity** | Wi-Fi **and** Ethernet | **Wi-Fi only** |
+| **NFC readers** | PN532, PN7160/PN7161, ST25R3916 | **PN532 only** |
+| **Firmware update** | Web UI OTA + GitHub updater | **Dual-slot OTA over the LAN** (with rollback) or serial |
 | **Flash encryption** | **Disabled** | **Supported** (currently off) |
 | **Secure Boot** | **Disabled** | **Supported** (currently off, V1 ECDSA-P256) |
 | **NVS encryption** | **Disabled** | **Supported** (currently off) |
 
-**Unchanged:** the HomeKey/NFC protocol, lock logic, the HomeKit accessory model, the existing Web UI pages and all existing MQTT topics.
+**Unchanged:** the HomeKey/NFC protocol, lock logic, the HomeKit accessory model and all existing MQTT topics.
 
 > The security features are **implemented but disabled by default** so the board stays
 > fully reversible. Turning them on is a deferred, one-way step: it burns eFuses, erases
@@ -52,8 +56,7 @@ Use the navigation on the left (or use the top-right menu if you're on a mobile 
 ## Configuration & Customization
 
 * **[Configuration](configuration):** Every smart home is unique, and so should be your HomeKey-ESP32. Learn how to customize its settings to perfectly fit your needs, whether it's Wi-Fi credentials, MQTT broker details, or HomeKit parameters. This is where you make it truly *yours*.
-* **[MQTT Integration](mqtt):** Want your HomeKey-ESP32 to chat with your smart home hub? This section details how to integrate your device with MQTT, allowing for seamless communication and automation. Get ready for some serious smart home synergy!
-
+* **[MQTT Integration](mqtt):** Want your HomeKey-ESP32 to chat with your smart home hub? This section details how to integrate your device with MQTT, allowing for seamless communication and automation. Get ready for some serious smart home synergy!*   **[Home Assistant Integration](home-assistant):** A custom component (`homekey_household`) that manages a whole household in Home Assistant — either over MQTT or **directly over the node's pinned HTTPS API, with no broker at all**. Covers entities, guest tags, backups, and knowing who opened the door.
 ## Maintenance & Troubleshooting
 
 * **[Updates](updates):** Keep your HomeKey-ESP32 running smoothly with the latest features and bug fixes. This guide explains how to update your device's firmware, including the magic of Over-The-Air (OTA) updates. Stay fresh, stay secure!

@@ -1,6 +1,6 @@
 ---
 title: "Prerequisites"
-weight: 1
+weight: 2
 ---
 
 # Gearing Up for HomeKey-ESP32
@@ -52,36 +52,41 @@ The required hardware can be obtained either by sourcing all the parts yourself 
 
 *   **What it is:** The brain of your HomeKey-ESP32 device! A microcontroller board with Wi-Fi and Bluetooth capabilities.
 *   **Why you need it:** This is where our HomeKey magic lives.
-*   **Recommendation:** Look for a board with an ESP32-C6, however, other ESP32 development boards should also work fine, precompiled firmware is being released for ESP32, ESP32-S3, ESP32-C3, or ESP32-C6.
+*   **Recommendation:** An **ESP32-C3** or a classic **ESP32** — these are the two targets this fork builds for, and both are tested on hardware. Other upstream targets (ESP32-S3, ESP32-C6) are **not built by this fork**.
+
+> [!IMPORTANT]
+> **This fork supports a narrower hardware set than upstream.** Ethernet is removed,
+> and so are the PN7160/PN7161 and ST25R3916 readers. Choose your board and NFC
+> module accordingly — see [Fork vs Upstream](fork-vs-upstream).
 
 ##### ESP32 Buyer's Guide
 
 > [!NOTE]
-> For the best performance, search for one of the newer variants e.g. ESP32-C6 or ESP32-S3.
+> Both supported targets work. The **ESP32-C3** is smaller and cheaper; the classic
+> **ESP32** has more flash headroom for the dual-slot OTA layout (7.80 % free vs
+> 1.60 % on the C3).
 
 Generally, any board should be fine. However, some may have non-genuine modules or just cheap flash chips with low endurance. There is no real way of telling which is the better clone. Genuine modules typically have "ESPRESSIF" etched on the metal casing.
 
 > [!TIP]
 > Genuine development boards can be ordered from major distributors like Mouser or Digikey, though it's pricey compared to something like AliExpress.
 
-#### 2.1.2. NFC Reader Modules (PN532, PN7161 and ST25R3916)
+#### 2.1.2. NFC Reader Module — PN532
 
-HomeKey-ESP32 supports **PN532**, **PN7161**, and ST25R3916 NFC controllers.
+> [!IMPORTANT]
+> **This fork supports the PN532 only.** Upstream also supports the **PN7160/PN7161**
+> (SPI, with IRQ/VEN pins) and the **ST25R3916** (I2C). Those backends were removed
+> here to free flash for the second OTA application slot. If you already own one of
+> them, you need upstream firmware and the
+> [upstream documentation](https://rednblkx.github.io/HomeKey-ESP32/prerequisites/).
 
 *   **PN532:**
     *   **Interface:** SPI protocol.
     *   **Recommendation:** Ensure you have a PN532 module that supports SPI communication (for red Elechouse boards/clones, DIP switches must be set to `0` and `1`).
     *   Avoid long jumper wires between the module and ESP32 to maintain signal integrity.
+    *   **Wiring differs per chip** — GPIO18/19/23/5 on a classic ESP32, GPIO4/5/6/7 on an ESP32-C3. See [Setup → PN532 Module Wiring](setup#21-pn532-module-wiring).
 
-*   **PN7161:**
-    *   **Interface:** SPI protocol with dedicated **IRQ** (Interrupt Request) and **VEN** (Enable/Reset) control pins.
-    *   **Features:** Enhanced Contactless Polling (ECP) support, fast tag discovery, integrated presence checks for non ISO-DEP cards, and reliable hardware performance.
-        *   PN7161 has native ECP support and that is how ECP is implemented on this firmware for it, however, currently there's no fallback implemented for PN7160 which doesn't has native ECP support.
-
-*   **ST25R3916**:
-    *   Interface: I2C protocol
-
-##### Choosing Your NFC Module: A Mini Buyer's Guide
+##### Choosing Your PN532: A Mini Buyer's Guide
 
 > [!NOTE]
 > The information given here won’t guarantee that what you buy will be 100% without issues but aims to guide you toward a better part.
@@ -107,37 +112,12 @@ You can also buy from Elechouse for best quality (original red board designer) o
     *   **@lollokara's PCB:** Features external NFC antenna, RGB LED, and 48V input (alongside USB-C). Available on [GitHub](https://github.com/lollokara/HomeKey-ESP32-PCB) or [PCBWay](https://www.pcbway.com/project/shareproject/ESP32_Homekey_77a119d7.html).
         *   There's two disconnected pads on the top left to the right of the USB-C that need to be soldered(pad bottom-left SEL1 and pad top-right SEL0) to select SPI mode but a manufacturer like PCBWay can handle this, however, they can sometimes misinterpret, so be prepared to put some solder.
     *   **CASmo-NFC:** Features an integrated NFC Antenna. Manufacturer is located in Germany. Can be ordered from their [website](https://casmo.info/en/shop/casmo-nfc-3).
-    *   **CASmo-NFC-MB-ETH:** Features an external NFC antenna, Ethernet port and can powered through USB-C, PoE or 5–24V AC/DC, additionally includes a 5A potential-free relay. Can be ordered from the manufacturer's [website](https://casmo.info/en/shop/casmo-nfc-mb-eth-15).
+
+> [!NOTE]
+> The **CASmo-NFC-MB-ETH** board (upstream's Ethernet variant) is **not supported by
+> this fork** — the Ethernet driver was removed. Its NFC side is a PN532, so the board
+> itself still works, but its Ethernet port will be dead and you must select the
+> `CASmo-NFC` preset rather than `CASmo-NFC-MB-ETH`.
 
 > [!NOTE]
 > The project and its owner are not affiliated with the aforementioned products nor with their designer/manufacturer or any relevant party, this section is only meant to list solutions and to praise community efforts.
-
-### 2.3. Option C - M5Stack AtomS3 Lite + Unit NFC
-
-The ST25R3916 backend was developed against an M5Stack pairing that needs no
-soldering, breadboard or jumper wires - the two parts connect with the supplied
-Grove cable:
-
-| Part | Notes |
-|------|-------|
-| [M5Stack AtomS3 Lite](https://shop.m5stack.com/products/atoms3-lite-esp32s3-dev-kit) | ESP32-S3, 8 MB flash, USB-C, RGB status LED on GPIO 35 |
-| [M5Stack Unit NFC (ST25R3916)](https://shop.m5stack.com/products/nfc-universal-unit-st25r3916) | I2C address `0x50`, HY2.0-4P Grove connector |
-
-Configuration in the web UI:
-
-| Setting | Value |
-|---------|-------|
-| Reader Type | `ST25R3916 (I2C)` |
-| SDA Pin | `2` |
-| SCL Pin | `1` |
-| NeoPixel Pin (optional) | `35`, type `GRB` - gives tap/success/failure feedback |
-
-Measured on this hardware: full FAST-flow authentication in **130-160 ms**.
-
-> [!NOTE]
->
-> For developers:
-> The Grove connector does not break out the ST25R3916 IRQ pin, so the driver
-> polls the interrupt status registers over I2C instead. Hardware I2C at
-> 400 kHz is required - M5Stack documents that SoftwareI2C latency is too high
-> for the chip's RF timing.

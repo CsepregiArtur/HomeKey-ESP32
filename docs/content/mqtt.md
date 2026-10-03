@@ -1,6 +1,6 @@
 ---
 title: "MQTT"
-weight: 4
+weight: 7
 ---
 
 # Your HomeKey-ESP32's Secret Language
@@ -166,6 +166,12 @@ This is where the real fun begins! Your HomeKey-ESP32 can integrate with Home As
 > * Endpoint ID (12 characters) - A unique identifier for the Apple device (iPhone, Apple Watch) that was used to authenticate.
 
 *   **Prerequisites:** Ensure your Home Assistant MQTT integration is configured with the same broker as the ESP32, and the discovery prefix is the default `homeassistant`.
+
+> [!TIP]
+> **You do not need MQTT to use Home Assistant with this fork.** There is a custom
+> component that talks to the node **directly over its pinned HTTPS API, with no broker
+> at all** — see [Home Assistant Integration](home-assistant). The MQTT path documented
+> here is kept for people who already run a broker.
 *   **Creating Automations:** Once a tag is discovered in Home Assistant, you can name it and create custom automations based on its scan. For example, scan a tag to:
     *   Unlock the door.
     *   Turn on lights.

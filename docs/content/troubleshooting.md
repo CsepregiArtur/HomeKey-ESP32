@@ -1,6 +1,6 @@
 ---
 title: "Troubleshooting"
-weight: 7
+weight: 17
 ---
 
 ## Locked out of the Web UI
@@ -14,7 +14,24 @@ If you never changed the setup AP password from the shipped value, it is `HomeKe
 
 ## Over-the-air uploads are refused
 
-There is no OTA path. The single-slot layout has no second application slot and no `otadata`, so `espota`, the Web UI uploader and the GitHub updater are all gone. Install firmware over serial (`idf.py -p <port> flash` or `pio run -t upload`). See [Single-slot layout](single_slot_layout).
+The update endpoints require **HTTPS** and Web UI authentication. If the Update page
+refuses immediately, check that you opened the device over `https://`, and that you
+are logged in. A plain-HTTP upload is rejected on purpose: an image is the most
+valuable thing a caller can send. See [Updates](updates#1-from-the-web-ui).
+
+If the upload starts and then fails, the image probably does not fit — the page shows
+the slot size, and the C3 build has only ~30 KB of headroom. Use a smaller image, or
+switch to the single-slot `no_ota.csv` layout. Flashing over the cable always works:
+`./scripts/ota_update.py --port <port>`.
+
+## The update succeeded but the device is still on the old version
+
+This is **rollback**, working as designed. A newly installed image is marked *pending
+verify*; if it does not confirm itself (see `setup()` in `main/main.cpp`), the
+bootloader abandons it for the previous slot on the next reset. Check the boot log's
+`Running partition` line to see which slot is live. A device that boots a good image
+but resets later - in `loop()`, for example - is also rolled back. See
+[Updates → Safety: rollback](updates#safety-rollback).
 
 ## Requests are rejected with 401 even though the password is correct
 
@@ -22,7 +39,14 @@ The Web UI rejects requests whose `Host` header does not name the device (this b
 
 ## `espota.py` - "No response from Device" or "No response from the ESP"
 
-`espota.py` is not applicable to this firmware: it uploads over the air, and there is no OTA path on the single-slot layout. Use a serial flash. If you are reading this while debugging an older build, the usual cause is that the PC and the ESP32 cannot reach each other on the invitation port (3232) or the listening port (10000-60000, `-P`).
+`espota.py` is **not** the update mechanism in this fork, and the `espota`/ArduinoOTA service is never enabled. Updates go over the LAN through the Web UI's Update page, or over the cable:
+
+```bash
+./scripts/ota_update.py            # detects the chip, then asks how to update
+./scripts/ota_update.py --port /dev/cu.usbserial-XXXX
+```
+
+See [Updates](updates).
 
 ## HomeKey not working on Apple Watch
 

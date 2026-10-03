@@ -1,6 +1,6 @@
 ---
 title: "Updating firmware"
-weight: 5
+weight: 9
 ---
 
 # Updating firmware

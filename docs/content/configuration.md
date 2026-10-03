@@ -1,6 +1,6 @@
 ---
 title: "Configuration"
-weight: 3
+weight: 5
 ---
 
 # Making HomeKey-ESP32 Yours (via the Web Interface)
@@ -8,10 +8,10 @@ weight: 3
 > [!NOTE]
 > **Fork differences in the Web UI.** Upstream ships the Misc, MQTT, OTA, Logs and
 > Actions pages. This fork **adds** *household*, *node*, *health*, *security*,
-> *audit*, *backup*, *recovery* and *provision*, and **removes** the OTA page: there is
-> no over-the-air update any more. The remaining pages are unchanged, and the default
-> security posture matches upstream (flash encryption off). See
-> [Fork vs Upstream](fork-vs-upstream).
+> *audit*, *backup*, *recovery*, *provision*, *guest tags* and a reworked *Update*
+> page. It also **removes the Ethernet settings** and the PN7160/PN7161 and
+> ST25R3916 reader options — Wi-Fi and the PN532 only. The default security posture
+> matches upstream (flash encryption off). See [Fork vs Upstream](fork-vs-upstream).
 
 Welcome to the control center of your HomeKey-ESP32! This guide will walk you through all the settings you can tweak to make your device work exactly how you want it to. All these configurations are easily managed through the device's intuitive web interface.
 
@@ -23,8 +23,8 @@ Welcome to the control center of your HomeKey-ESP32! This guide will walk you th
 >
 > Enabling them is a **deferred, one-way step**. It is irreversible: the eFuses are
 > one-time programmable. It **erases the device's Wi-Fi credentials, HomeKit pairing and
-> HomeKey enrolment**, and because the partition layout changes an OTA update is not
-> possible - a serial flash and full re-provisioning are required. Read
+> HomeKey enrolment**, and changes the partition layout, so a serial flash and full
+> re-provisioning are required. Read
 > **[Security Rollout Plan: Path 1 → Path 2](PATH2_SECURITY_ROLLOUT)** before enabling
 > anything.
 
@@ -58,7 +58,6 @@ This section provides real-time information about your HomeKey-ESP32 device's op
 *   **Uptime:** System uptime in milliseconds since boot.
 *   **Free Heap:** Available free heap memory in bytes.
 *   **Wi-Fi Signal:** Wi-Fi RSSI (Received Signal Strength Indicator) in dBm.
-*   **Ethernet Status:** Indicates whether Ethernet connectivity is active.
 *   **NFC Module Status:** Shows the connection status of the configured NFC module. Displays active status label and diagnostic messages.
 *   **MQTT Connection Status:** Real-time label indicating connection state (Connected, Error, Disconnected) along with specific error codes/messages if connection fails.
 
@@ -147,30 +146,30 @@ Configure HomeKit device identity and authentication behavior.
 
 ### 5.2. Hardware Tab
 
-Configure GPIO pin allocations for the NFC reader, Ethernet, and HomeSpan status controls.
+Configure GPIO pin allocations for the PN532 reader and HomeSpan status controls.
 
 #### 5.2.1. GPIO Allocation & Safety
-*   **Override strapping pins restriction:** Assigning a strapping pin (chip-specific; e.g., GPIO 0 and 2 on standard ESP32, GPIO 0/3/45–48 on ESP32-S3) is rejected with an error and the configuration cannot be saved while this is off. Enabling this option lifts the restriction and allows strapping pin assignments.
+*   **Override strapping pins restriction:** Assigning a strapping pin (chip-specific; e.g., GPIO 0 and 2 on a classic ESP32, GPIO 2/8/9 on an ESP32-C3) is rejected with an error and the configuration cannot be saved while this is off. Enabling this option lifts the restriction and allows strapping pin assignments.
     > [!CAUTION]
     > Using strapping pins can disrupt normal ESP32 boot behavior if not handled carefully with external pull-up/pull-down resistors.
 
 #### 5.2.2. NFC Reader Configuration
-*   **Reader Type:** Select your NFC reader hardware (**PN532** over SPI, **PN7161** over SPI, or **ST25R3916** over I2C).
-*   **Preset:** Select predefined hardware board presets (@lollokara, CASmo-NFC, CASmo-NFC-MB-ETH, PN7161 presets, or `Custom`).
-*   **Pin Assignments:**
-    *   **PN532 (SPI):** Assign `SS Pin`, `SCK Pin`, `MISO Pin`, and `MOSI Pin`.
-    *   **PN7161 (SPI):** Assign SPI bus pins (SCK, MOSI, MISO, SS) alongside dedicated `IRQ Pin` and `VEN Pin` (Hardware Enable/Reset).
-    *   **ST25R3916 (I2C)**: Assign I2C bus pins (SDA, SCL)
+
+> [!IMPORTANT]
+> **Only the PN532 is supported in this fork.** Upstream's `PN7161 (SPI)` and
+> `ST25R3916 (I2C)` options, their IRQ/VEN pins and their presets were removed to free
+> flash for the second OTA slot. See [Fork vs Upstream](fork-vs-upstream).
+
+*   **Reader Type:** `PN532 (SPI)` — the only supported reader.
+*   **Preset:** Select a predefined hardware board preset (@lollokara, CASmo-NFC, or `Custom`).
+*   **Pin Assignments (PN532, SPI):** Assign `SS Pin`, `SCK Pin`, `MISO Pin`, and `MOSI Pin`.
+    > [!WARNING]
+    > **The defaults are chip-specific** — GPIO18/19/23/5 on a classic ESP32, but
+    > GPIO4/5/6/7 on an ESP32-C3, where GPIO18/19/23 **do not exist**. See
+    > [Setup → PN532 Module Wiring](setup#21-pn532-module-wiring).
 *   **Fast NFC Polling:** Enables reduced delay between poll cycles for quicker tag detection.
 
-#### 5.2.3. Ethernet Configuration
-*   **Enable Ethernet:** Enables wired Ethernet network connectivity instead of Wi-Fi.
-*   **Board Preset & PHY Type:** Select board preset or PHY chip type (e.g., `W5500`, `LAN8720`, `TLK110`).
-*   **SPI Configuration:** When using SPI Ethernet modules (like W5500), configure `SPI Bus`, `Freq (MHz)`, `CS Pin`, `IRQ Pin`, `RST Pin`, `SCK Pin`, `MISO Pin`, and `MOSI Pin`.
-    > [!NOTE]
-    > When sharing an SPI bus between PN532/PN7161 and SPI Ethernet, ensure the SCK, MISO, and MOSI pins match.
-
-#### 5.2.4. HomeSpan Settings
+#### 5.2.3. HomeSpan Settings
 *   **Control GPIO Pin:** Optional physical pairing/reset button pin (set to `255` if unused).
 *   **Status LED GPIO Pin:** Optional HomeSpan status indicator LED pin (set to `255` if unused).
 
@@ -205,4 +204,32 @@ Configure WebUI authentication, HTTPS SSL/TLS encryption, and certificates.
 *   **Log Level Filtering:** Toggle between `ERROR`, `WARN`, `INFO`, `DEBUG`, and `VERBOSE` log levels.
 *   **Collapsible Mobile Toolbar:** Compact log toolbar designed for mobile viewports with expandable search and filter controls.
 *   **Formatted JSON Log Export:** Export diagnostic logs to timestamped JSON files (`logs-YYYY-MM-DD-HH-MM-SS.json`) for easy troubleshooting and support sharing.
+
+---
+
+## 7. Pages Added by This Fork
+
+These pages do **not** exist upstream. They are the household/security layer described
+in [Household & Node Architecture](household); each one is a read-mostly view over a
+firmware module.
+
+| Page | What it shows | Related docs |
+| --- | --- | --- |
+| **Household** | Household id/name/state, the trust anchor, member nodes, and the recovery secret | [Household](household) |
+| **Node** | This device's Ed25519 identity, generation counter and role | [Household](household) |
+| **Health** | Aggregated health snapshot (network, reader, MQTT, storage) | — |
+| **Security** | Read-only security posture: which hardening is on, and what is still open. **No numeric score.** | [Security](security) |
+| **Audit** | Bounded, 256-record log of security-relevant events | — |
+| **Backup** | Export an encrypted, signed household backup | [Household](household#field-classification) |
+| **Recovery** | Restore onto a replacement node from a backup | [Household](household) |
+| **Provision** | Generate single-use, expiring join codes to enrol a new node | [Household](household) |
+| **Guest tags** | Enrol ordinary NFC cards (NTAG213/215/216) as guest credentials | [Guest NFC Tags](guest-tags) |
+| **Update** | Upload a firmware image over the LAN, and see the running version, partition and slot size | [Updates](updates#1-from-the-web-ui) |
+
+> [!NOTE]
+> Two of these replace functionality that upstream exposes differently:
+> **Update** replaces upstream's OTA page *and* its "update from GitHub" route — this
+> fork installs a local `.bin` over the LAN or over the cable, and never contacts
+> GitHub from the device. **Provision** and **Recovery** are new; upstream has no
+> multi-node concept to provision.
 

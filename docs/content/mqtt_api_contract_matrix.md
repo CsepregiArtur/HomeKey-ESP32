@@ -1,6 +1,6 @@
 ---
 title: "MQTT API Contract Matrix"
-weight: 8
+weight: 14
 ---
 
 # MQTT API Contract Matrix
@@ -10,7 +10,7 @@ weight: 8
 > this fork. Upstream's MQTT surface is the smaller legacy topic set; nothing here
 > exists upstream. See [Fork vs Upstream](fork-vs-upstream).
 
-Formal interface contract between **HomeKey-ESP32 0.10.0** and
+Formal interface contract between **HomeKey-ESP32 v0.12.0** and
 **HomeKey Household — Home Assistant V2**. This document is the result of a
 read-only audit of the actual firmware implementation (`main/MqttManager.cpp`,
 `main/include/MqttManager.hpp`, `main/include/config.hpp`,
@@ -136,7 +136,7 @@ endpoint id = key identifier). No key material or APDU.
 ```json
 {"household_id":"…","node_id":"…","node_name":"…","node_role":"gate|main_house|small_house|garage|workshop|other",
  "node_state":"UNCONFIGURED|PROVISIONING|ACTIVE|REVOKED|RECOVERY_REQUIRED","generation":1,
- "firmware_version":"0.10.0…"}
+ "firmware_version":"0.12.0…"}
 ```
 
 ### `B/health`
@@ -309,8 +309,11 @@ write NVS.
 - Source: `SecurityManager::compute()` → `HealthManager::snapshot().security_all_ok`.
 - Underlying checks: `secure_boot`, `flash_encryption`,
   `mqtt_tls`, `https`, `web_auth` (each OK/WARNING/DISABLED).
-- There is no `ota_signature` or `homespan_ota` check any more: the single-slot layout has
-  no over-the-air path, so both were removed with it.
+- The `ota_signature` and `homespan_ota` checks are not part of this set. The device
+  updates over the LAN through its own HTTPS endpoint with certificate pinning and
+  rollback (see [Updating firmware](updates)), not through HomeSpan's OTA service or a
+  GitHub updater, so neither of those checks has anything to report. Update state is not
+  a *security* check.
 - No numeric security score is exposed (not on MQTT, not in the Web UI).
 
 ---
@@ -320,8 +323,11 @@ write NVS.
 - Source: `esp_app_get_description()->version` (e.g. `0.11.0-dev+<hash>`).
 - Exposed in `B/state.firmware_version` and `B/health.firmware_version`; mapped to
   the firmware sensor via `B/state`.
-- No update state and no update orchestration over MQTT: the single-slot layout has no
-  over-the-air path at all, so there is nothing for Home Assistant to trigger.
+- No update state and no update orchestration over MQTT. Updating is deliberately **not**
+  exposed on this surface: an image is installed either over the cable or through the
+  device's own authenticated HTTPS endpoint (`POST /api/ota/firmware`), which requires both
+  a Web UI credential and TLS. Nothing on MQTT can cause the device to install firmware.
+  See [Updating firmware](updates).
 
 ---
 

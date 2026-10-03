@@ -1,6 +1,6 @@
 ---
 title: "Single-slot layout (no OTA)"
-weight: 12
+weight: 15
 ---
 
 # Single-slot layout (no OTA)

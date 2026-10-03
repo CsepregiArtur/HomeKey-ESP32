@@ -1,6 +1,6 @@
 ---
 title: "Household & Node Architecture"
-weight: 5
+weight: 8
 ---
 
 # Household & Node Architecture

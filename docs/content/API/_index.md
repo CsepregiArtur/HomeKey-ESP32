@@ -13,10 +13,18 @@ This section provides an overview of the public APIs implemented in the HomeKey-
 *   **[HomeKitLock](../api/homekitlock/):** HomeSpan HomeKit accessory implementation.
 *   **[LockManager](../api/lockmanager/):** Lock state machine managing target vs current states.
 *   **[MqttManager](../api/mqttmanager/):** Async MQTT client, TLS management, and HASS Auto-Discovery.
-*   **[NfcManager](../api/nfcmanager/):** Multi-reader NFC driver (PN532 SPI, PN7161 SPI and ST25R3916 I2C), ECP frame broadcasting, and DigitalDoorKey integration.
+*   **[NfcManager](../api/nfcmanager/):** PN532 NFC driver (SPI), ECP frame broadcasting, and DigitalDoorKey integration.
 *   **[ReaderDataManager](../api/readerdatamanager/):** Storage for Apple HomeKey reader keys and issuer endpoint data.
-*   **[WebServerManager](../api/webservermanager/):** Async HTTP/HTTPS web server, Svelte 5 WebUI with `sv-router`, WebSockets, and certificate management.
-*   **[EthernetDriver](../api/ethernetdriver/):** Dedicated module for Ethernet initialization, GPIO pin leasing, and lifecycle event handling (start, link, IP assignment) over the `AppEventLoop`.
+*   **[WebServerManager](../api/webservermanager/):** Async HTTP/HTTPS web server, Svelte 5 WebUI with `sv-router`, WebSockets, certificate management, and the OTA endpoints.
+
+> [!NOTE]
+> **Two upstream modules do not exist in this fork:**
+> * **`EthernetDriver`** — removed; this fork is Wi-Fi only, so the whole Ethernet
+>   subsystem (SPI modules and RMII PHYs) is gone.
+> * **The PN7160/PN7161 and ST25R3916 reader backends** — removed; `NfcManager` drives
+>   the **PN532 only**.
+>
+> See [Fork vs Upstream](../fork-vs-upstream) for why.
 
 ## Event System (AppEventLoop)
 The project uses the `AppEventLoop` system for internal communication between components. This is a modern C++ wrapper around ESP-IDF's native event loop. See [AppEventLoop](../api/appeventloop/) for details.

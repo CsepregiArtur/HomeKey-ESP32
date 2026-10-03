@@ -1,12 +1,18 @@
 ---
 title: "Guest NFC Tags"
-weight: 13
+weight: 16
 ---
 
 Guest tags let **ordinary NFC cards** (NTAG213/215/216 stickers, key fobs, …) unlock a
 node, the same way a HomeKey tap does, with an optional validity window. They exist for
 people who should be able to get in for a while — a cleaner, a dog walker, a guest — but
 who do not have a HomeKey credential on an Apple device.
+
+> [!TIP]
+> Guest tags can be managed and monitored from Home Assistant — teach, revoke and cancel
+> a card write, see the card list and set a default validity window. Managing them needs
+> the integration's **direct (TLS) transport**. See
+> [Home Assistant Integration → Guest tags](home-assistant#61-guest-tags).
 
 > [!IMPORTANT]
 > **A guest tag is not a HomeKey credential, and it cannot be made into one.**

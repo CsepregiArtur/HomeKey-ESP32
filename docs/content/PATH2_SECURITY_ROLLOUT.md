@@ -1,11 +1,16 @@
+---
+title: "Security Rollout Plan: Path 1 → Path 2"
+weight: 18
+---
+
 # Security Rollout Plan: Path 1 → Path 2
 
 > **Status:** Path 1 active. Path 2 is **deferred** until the firmware is fully
 > validated on real hardware.
 > **Decision date:** 2026-09-25
 > **Owner:** @CsepregiArtur
-> **Revised:** 2026-09-26 — rewritten for the single-slot (no OTA) layout; see
-> [Single-slot layout](single_slot_layout).
+> **Revised:** 2026-10-03 — the partition layout it refers to is now the dual-slot
+> `with_ota.csv`; see [Updating firmware](updates).
 
 This document records the deliberate two-step approach to hardware security on
 this fork, why it is split in two, and exactly what changes when Path 2 is
@@ -44,10 +49,14 @@ backup/restore cycle passes — all on an unencrypted build. Only then does it m
 sense to make the part that is hard to change permanent.
 
 > [!IMPORTANT]
-> **This layout has no over-the-air update**, which changes what Path 2 costs.
-> With no OTA path, Stage 4 (Release mode) does not merely make updates harder,
-> it makes them **impossible** — no cable, no network, no rollback. Read Stage 4
-> before starting anything below.
+> **This layout has over-the-air firmware update**, which changes what Path 2 costs
+> — for the better. The device uses the **dual-slot** `with_ota.csv`
+> (`ota_0` + `ota_1` + `otadata`) with `CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y`, so
+> an image that fails to confirm itself is rolled back automatically. Encrypted and
+> signed images can therefore be delivered **over the LAN** as well as over the
+> cable, and a bad one does not brick the device. Read
+> [Stage 4](#stage-4--release-mode) before starting anything below, and see
+> [Updating firmware](updates).
 
 ---
 
@@ -66,13 +75,17 @@ The board is in a **fully reversible** state. No eFuse has been touched.
 ```
 
 - `CONFIG_PARTITION_TABLE_OFFSET` is **not** set → ESP-IDF default `0x8000`.
-- `no_ota.csv` has **no** `nvs_keys` partition; the first partition is `nvs` at
-  `0x9000` (92 KiB), then a single `factory` application slot of 3840 KiB at
-  `0x20000`, then `spiffs` at `0x3E0000`. There is no `otadata` and no second
-  application slot: the device does not update itself over the air.
-- `CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE` is **off** and must stay off. Rollback
-  needs an `otadata` partition to record which slot is pending, and there is no
-  second slot to roll back to.
+- `with_ota.csv` (the **active** table) has **no** `nvs_keys` partition. It is
+  `nvs` at `0x9000` (92 KiB), `otadata` at `0x20000` (8 KiB), `app0`/`ota_0` at
+  `0x30000` and `app1`/`ota_1` at `0x200000` (1856 KiB each), then `spiffs` at
+  `0x3E0000`. The device updates itself over the air, with automatic rollback.
+- `CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE` is **on**, and must stay on. Rollback
+  needs the `otadata` partition to record which slot is pending, and
+  `main/main.cpp` calls `homeSpan.markSketchOK()` once the system is up so a good
+  image is confirmed instead of abandoned.
+- `no_ota.csv` (a single 3840 KiB `factory` slot, no `otadata`) still exists as a
+  **fallback** if the dual-slot headroom ever becomes a problem, but it is **not**
+  the active table and moving to it is a separate, deliberate change.
 
 ### Verifying no eFuses are burned
 
@@ -125,9 +138,10 @@ fallback no longer exists.**
 All must be true before starting:
 
 - [ ] Path 1 build is validated on hardware: boots, provisioning works, HomeKit
-      pairs, MQTT contract verified, and a **serial** flash cycle has been done
-      end to end. (There is no OTA to validate - and nothing to fall back on if
-      Stage 4 goes wrong.)
+      pairs, MQTT contract verified, and both a **serial** and an **OTA** flash
+      cycle have been done end to end. The OTA cycle matters here: on this layout
+      it is the route you will depend on after Release mode, and rollback is what
+      saves you if a signed image is bad.
 - [ ] `idf.py efuse-summary` confirms **all** eFuses still pristine (table above).
 - [ ] `keys/secure_boot_signing_key.pem` exists and is **backed up off-machine**.
       Losing it means the device can never be re-flashed or updated again.
@@ -210,36 +224,44 @@ Only after Stage 1 is verified.
    CONFIG_PARTITION_TABLE_OFFSET=0xD000
    ```
 
-   Keep the **single-slot** shape — one `factory` slot, no `otadata`, no `app1`:
+   Keep the **dual-slot** shape — `ota_0` + `ota_1` + `otadata` — so over-the-air
+   updates and rollback keep working. Only add `nvs_keys` and move the table:
 
    ```
    # Name,   Type, SubType,  Offset,   Size,     Flags
-   nvs,      data, nvs,      0xE000,   0x11000,
-   nvs_keys, data, nvs_keys, 0x1F000,  0x1000, encrypted
-   app0,     app,  factory,  0x20000,  0x3C0000,
+   nvs,      data, nvs,      0xE000,   0x17000,
+   nvs_keys, data, nvs_keys, 0x25000,  0x1000, encrypted
+   otadata,  data, ota,      0x26000,  0x2000,
+   app0,     app,  ota_0,    0x30000,  0x1D0000,
+   app1,     app,  ota_1,    0x200000, 0x1D0000,
    spiffs,   data, spiffs,   0x3E0000, 0x20000,
    ```
 
    Notes:
    - `nvs_keys` must exist and be flagged `encrypted`, otherwise the device
      fails to boot.
-   - `app0` must stay subtype **`factory`**. Do **not** restore `ota_0` and
-     `app1` from an earlier revision of this document. With no `otadata`
-     partition, `bootloader_utility_get_selected_boot_partition()` returns
-     `FACTORY_INDEX` unconditionally
-     (`bootloader_support/src/bootloader_utility.c`), so a table with no
-     `factory` slot and no `otadata` has nothing to boot.
-     **The partition tool does not catch this** - it validates structure, not
-     bootability - so the mistake builds cleanly and shows up only as a device
-     that resets in a loop. `CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE` must stay
-     **off** for the same reason: it needs `otadata` to record which slot is
-     pending.
-   - `nvs` moves from `0x9000` to `0xE000` and shrinks 92 KiB → 68 KiB, which is
-     still far above the 24 KiB it had before the single-slot change. The move
-     is what makes this stage destructive to NVS as well as to the flash.
-   - `app0` must be 64 KiB aligned — `0x20000`, not `0x1F000`.
+   - Keep the app partitions on **64 KiB boundaries** (`0x30000`, `0x200000`) and
+     keep `spiffs` at `0x3E0000` — the layout still ends exactly at `0x400000`
+     for a 4 MB chip. Verify any edit with
+     `python "$IDF_PATH/components/partition_table/gen_esp32part.py" with_ota.csv`
+     before flashing; a table that does not fit the flash builds cleanly and
+     fails only on the device.
+   - `otadata` **must** be present. `CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE` needs
+     it to record which slot is pending, and without it
+     `bootloader_utility_get_selected_boot_partition()` has no slot to select.
+     Dropping `otadata` while leaving `ota_0`/`ota_1` produces a device that
+     resets in a loop, and the partition tool will not warn you — it validates
+     structure, not bootability.
+   - `nvs` moves from `0x9000` to `0xE000`. Its **size is kept at 92 KiB** rather
+     than shrunk: NVS is log-structured and only moves forward, so entries
+     written since the partition grew may sit anywhere in it, and shrinking it
+     could silently drop Wi-Fi credentials, HomeKit pairing or reader enrolment.
+     The move is itself destructive to whatever is currently stored, so this
+     stage costs a full re-provisioning regardless.
    - The `nvs` partition itself **cannot** be flash-encrypted; NVS has its own
      encryption layer. Adding `encrypted` to `nvs` breaks it.
+   - See [Updating firmware](updates#the-layout-and-why-nvs-did-not-shrink) for how
+     the sizes in the current table were arrived at.
 
 3. Re-flash. The device wipes NVS and re-initialises it with the new key.
 
@@ -266,9 +288,9 @@ Only after Stages 1 and 2 are verified.
    ```
 
    `CONFIG_SECURE_SIGNED_ON_UPDATE_NO_SECURE_BOOT` is deliberately **not** set.
-   It authenticated an over-the-air image; there is no over-the-air path, so
-   there is nothing for it to police. Secure Boot already authenticates what the
-   ROM loads from flash, which is the part that still matters.
+   It would add signature verification on top of Secure Boot for over-the-air
+   images without Secure Boot being enabled; with Secure Boot on, the ROM and
+   bootloader already authenticate what is loaded, so it is redundant here.
 
 3. Build, then flash. The first boot burns `ABS_DONE_0` and the key digest. From
    that point the device only boots bootloaders signed with that key.
@@ -292,14 +314,17 @@ This permanently disables UART download mode and write-protects
 `FLASH_CRYPT_CNT`.
 
 > [!CAUTION]
-> **On this layout, Stage 4 freezes the firmware permanently.** An earlier
-> revision of this document said that after Release mode new firmware could still
-> be installed over the air, signed with the Secure Boot key. That is no longer
-> true: the single-slot layout has no OTA path at all, and Release mode removes
-> the serial one. After Stage 4 there is **no route to update, patch, re-key or
-> roll back this device** — not over the network, not over the cable, not by
-> re-flashing. Treat Stage 4 as the decision to ship this firmware exactly as it
-> is, forever.
+> **On this layout, Stage 4 removes your last recovery route.** After Release mode
+> the serial port can no longer write to this device, so **network OTA is the only
+> way to change firmware from then on** — and it only accepts images signed with
+> your Secure Boot key. There is no route back to a previous firmware unless you
+> kept a signed copy of it, and no way to re-key the device. Treat Stage 4 as the
+> decision to ship this firmware to this hardware, permanently.
+>
+> This is a real change from the single-slot layout, where Release mode left no
+> update path at all and a bad image was unrecoverable. Here, rollback plus signed
+> OTA means a faulty update can be replaced — **provided you still hold the signing
+> key**. Lose that key and the device is frozen exactly as it is.
 >
 > If that is not what you want, **stop at Stage 3.** Secure Boot plus flash
 > encryption in Development mode already gives you an encrypted, authenticated

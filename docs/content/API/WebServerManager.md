@@ -84,15 +84,18 @@ The server exposes the following categories of endpoints. Requests are handled a
 *   `GET /config?type=<type>`: Retrieves the current configuration for the specified `type` (`mqtt`, `misc`, `actions`, or `hkinfo`).
 *   `POST /config/save?type=<type>`: Saves a new configuration from the JSON request body for the specified `type`. The server validates the request against the existing schema and triggers necessary application events or a reboot.
 *   `POST /config/clear?type=<type>`: Clears the configuration for the specified `type` and reboots the device.
-*   `GET /eth_get_config`: Retrieves supported Ethernet configurations and presets.
 *   `GET /nfc_get_presets`: Retrieves available NFC GPIO pin presets for different board configurations.
+
+> [!NOTE]
+> Upstream's `GET /eth_get_config` **does not exist in this fork** — the Ethernet driver
+> was removed. See [Fork vs Upstream](../fork-vs-upstream).
 
 ### Captive Portal (AP Mode)
 
 These endpoints are available when the device is in Access Point configuration mode:
 
 *   `GET /captive_portal`: Redirects to the captive portal page.
-*   `GET /captive_portal_config`: Retrieves initial configuration options for the captive portal (NFC presets, Ethernet config, current settings).
+*   `GET /captive_portal_config`: Retrieves initial configuration options for the captive portal (NFC presets, current settings).
 *   `POST /captive_portal_config`: Saves configuration from the captive portal (WiFi credentials, HomeKit setup code, NFC pins, Web UI credentials, etc.) and reboots the device. An empty `webPassword` keeps the stored password; enabling Web UI authentication without any usable password is rejected.
 *   `GET /wifi_scan`: Scans for available WiFi networks and returns a list of SSIDs with signal strength.
 
@@ -103,14 +106,25 @@ These endpoints are available when the device is in Access Point configuration m
 *   `POST /reset_wifi_cred`: Erases saved Wi-Fi credentials and reboots.
 *   `POST /start_config_ap`: Stops the web server and puts the device into Wi-Fi Access Point mode for configuration.
 
-### Over-the-Air (OTA) Updates — none
+### Over-the-Air (OTA) Updates
 
-There is no OTA route. The device uses a single-slot flash layout: one `factory` application
-partition and no OTA data partition, so a firmware image has nowhere to be written and no
-second slot to switch to. The former `POST /ota/*` upload endpoint, the `/ota/release` and
-`/ota/install` GitHub-update routes, and the HomeSpan OTA service are all gone. Firmware and
-the LittleFS web UI image are installed over serial - see
-[Single-slot layout](../../single_slot_layout/).
+The device uses a **dual-slot** flash layout (`with_ota.csv`): two application
+partitions (`ota_0` at `0x30000`, `ota_1` at `0x200000`, 1856 KiB each) plus an
+`otadata` selector. A firmware image is written into the slot the device is *not*
+running from, so the running image is never overwritten while it executes.
+
+*   `GET /api/ota/info`: Reports the running version, project name, target, chip cores and revision, the booted partition and slot, the slot size, and whether an update is available. Unauthenticated, like `/api/ha/info`.
+*   `POST /api/ota/firmware`: Installs a firmware image. **Requires both Web UI authentication (`basicAuth()`) and HTTPS (`haRequireTls()`)** — a plain-HTTP upload is refused. The body is streamed into `esp_ota_get_next_update_partition()` in 4 KiB heap chunks, validated with `esp_ota_end()`, made bootable with `esp_ota_set_boot_partition()`, and the device restarts.
+
+An image that fails to confirm itself is **rolled back** to the previous slot, because
+`CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y` and `setup()` calls `homeSpan.markSketchOK()`
+once the system is up.
+
+> [!NOTE]
+> **There is no GitHub updater in this fork.** The former upstream `/ota/release` and
+> `/ota/install` routes, the HomeSpan OTA service, and the OTA password are all gone.
+> The device never fetches firmware on its own — an update only happens when an
+> authenticated caller pushes one. See [Updates](../../updates/).
 
 ### Certificate Management
 

@@ -2,13 +2,15 @@
   <img width="169" height="200" alt="homekey-logo-200x200" src="https://github.com/user-attachments/assets/6c4bc1e8-c294-4a4b-842a-9837a680b913" />
 
   # HomeKey-ESP32
-  [![Discord](https://badgen.net/discord/members/VWpZ5YyUcm?icon=discord)](https://discord.com/invite/VWpZ5YyUcm)
-  [![CI](https://github.com/rednblkx/HomeKey-ESP32/actions/workflows/esp32.yml/badge.svg?branch=main)](https://github.com/rednblkx/HomeKey-ESP32/actions/workflows/esp32.yml)
+
+  [![CI](https://github.com/CsepregiArtur/HomeKey-ESP32/actions/workflows/esp32.yml/badge.svg?branch=main)](https://github.com/CsepregiArtur/HomeKey-ESP32/actions/workflows/esp32.yml)
   [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
   **Apple HomeKey functionality for the rest of us**
 
-  [Documentation](https://rednblkx.github.io/HomeKey-ESP32/)
+  ### 📖 [Documentation for this fork](https://csepregiartur.github.io/HomeKey-ESP32/)
+
+  <sub>Original project & documentation: [rednblkx/HomeKey-ESP32](https://github.com/rednblkx/HomeKey-ESP32) · <https://rednblkx.github.io/HomeKey-ESP32/></sub>
 
 </div>
 
@@ -17,24 +19,57 @@
 > [rednblkx/HomeKey-ESP32](https://github.com/rednblkx/HomeKey-ESP32) (upstream, MIT),
 > which remains the original project — all core HomeKey, NFC and HomeKit work is
 > theirs. Please send upstream bugs there and use this repository only for the
-> fork-specific additions below.
+> fork-specific changes below.
 >
-> **What this fork adds (0.10.0)**
+> **What this fork adds**
 > - **Household / multi-node architecture** — several nodes (gate, main house,
 >   garage, …) share trust and recovery material, each with its own
 >   non-transferable device identity.
 > - **Encrypted, signed household backups** (XChaCha20-Poly1305 + Ed25519).
 > - **Authenticated MQTT control** — lock/unlock over HMAC-SHA256 commands with
 >   replay protection, plus a documented Home Assistant MQTT discovery surface.
+> - **A Home Assistant custom component** ([`homekey_household`](https://github.com/CsepregiArtur/homekey-household)) —
+>   manages a whole household either over MQTT or **directly over the node's own
+>   HTTPS API with the certificate pinned and no broker required**. Adds lock control,
+>   guest-tag management, scheduled backups and "who opened the door" attribution.
 > - **Flash encryption, Secure Boot V1 and NVS encryption supported**
 >   (implemented but **off by default**; enabling is a deferred, irreversible step —
->   see the security warning below).
+>   see the security section below).
 > - New Web UI pages: household, node, health, security, audit, backup, recovery,
->   provision.
+>   provision, update, guest tags.
 >
-> See [`docs/content/household.md`](docs/content/household.md),
-> [`docs/content/mqtt_household_api.md`](docs/content/mqtt_household_api.md) and
-> [`docs/content/mqtt_api_contract_matrix.md`](docs/content/mqtt_api_contract_matrix.md).
+> **What this fork changes or removes**
+> - **Firmware updates are dual-slot OTA over the LAN**, or serial. The upstream
+>   GitHub updater is gone. See [`docs/content/updates.md`](docs/content/updates.md).
+> - **Ethernet is removed** — Wi-Fi only.
+> - **Only the PN532 NFC reader is supported.** PN7160/PN7161 and ST25R3916 were
+>   removed to free flash for the second OTA slot.
+> - **Compile targets: ESP32 and ESP32-C3**, auto-detected when flashing.
+
+The full, fork-specific documentation is published at
+**<https://csepregiartur.github.io/HomeKey-ESP32/>**, and its sources are in
+[`docs/content/`](docs/content).
+
+## 📚 Documentation
+
+| Page | What it covers |
+| --- | --- |
+| [**Fork vs Upstream**](https://csepregiartur.github.io/HomeKey-ESP32/fork-vs-upstream/) | Side-by-side list of every difference from the original project. **Start here if you are coming from upstream.** |
+| [Prerequisites](https://csepregiartur.github.io/HomeKey-ESP32/prerequisites/) | Hardware and tooling you need before starting |
+| [Setup](https://csepregiartur.github.io/HomeKey-ESP32/setup/) | Wiring, flashing, first-run configuration, HomeKit pairing |
+| [Configuration](https://csepregiartur.github.io/HomeKey-ESP32/configuration/) | Every Web UI setting, and this fork's extra pages |
+| [MQTT](https://csepregiartur.github.io/HomeKey-ESP32/mqtt/) · [Household API](https://csepregiartur.github.io/HomeKey-ESP32/mqtt_household_api/) | Broker setup, legacy topics, and the additive household namespace |
+| [**Home Assistant Integration**](https://csepregiartur.github.io/HomeKey-ESP32/home-assistant/) | The `homekey_household` custom component — MQTT **or** a broker-less, certificate-pinned HTTPS transport |
+| [Household & Node Architecture](https://csepregiartur.github.io/HomeKey-ESP32/household/) | Multi-node design, node identity, backups |
+| [Updates](https://csepregiartur.github.io/HomeKey-ESP32/updates/) | **Dual-slot OTA over the LAN, or serial.** Read before updating. |
+| [Security](https://csepregiartur.github.io/HomeKey-ESP32/security/) | Threat model, first-run credentials, optional hardening |
+| [Security Rollout Plan](https://csepregiartur.github.io/HomeKey-ESP32/path2_security_rollout/) | The deferred, irreversible hardening procedure |
+| [Troubleshooting](https://csepregiartur.github.io/HomeKey-ESP32/troubleshooting/) | Common problems |
+| [Guest NFC Tags](https://csepregiartur.github.io/HomeKey-ESP32/guest-tags/) · [HASS Automations](https://csepregiartur.github.io/HomeKey-ESP32/automations/) | Optional extras |
+| [API Reference](https://csepregiartur.github.io/HomeKey-ESP32/api/) | Class-by-class reference |
+
+Original project documentation: **<https://rednblkx.github.io/HomeKey-ESP32/>** — the
+reference for anything this fork has not changed.
 
 ## This fork vs. the original project
 
@@ -43,31 +78,40 @@ Upstream is the original project and is where the core HomeKey / HomeKit / NFC w
 lives. This table is the complete summary of what differs; the full explanation is
 in [`docs/content/fork-vs-upstream.md`](docs/content/fork-vs-upstream.md).
 
-| Area | Original project (`0.9.0`) | This fork (`0.10.0`) |
+| Area | Original project | This fork (`v0.12.0`) |
 | --- | --- | --- |
 | Scope | Single device | **Household** of multiple nodes |
 | Node identity | — | Ed25519 keypair per node, never cloned |
 | Backup | — | **Encrypted** (XChaCha20-Poly1305) + **signed** (Ed25519) |
 | Provisioning | — | Single-use, expiring, replay-protected join codes |
 | MQTT | Single-device legacy topics | **Additive** household namespace + HA discovery |
-| MQTT lock/unlock | Plain numeric payloads | **HMAC-SHA256 authenticated** commands |
-| Web UI | Misc, MQTT, OTA, Logs, Actions | **+ household, node, health, security, audit, backup, recovery, provision, update** |
-| Firmware update | OTA from the Web UI + GitHub | **OTA over the LAN** (dual-slot, with rollback) or **serial**; no GitHub updater, no UI-less device required |
-| Connectivity | Wi-Fi, Ethernet | **Wi-Fi only** (Ethernet driver removed) |
-| NFC readers | PN532, PN7160, ST25R3916 | **PN532 only** (the other two were removed to make room for the second OTA slot) |
+| MQTT lock/unlock | Plain numeric payloads | **HMAC-SHA256 authenticated** commands, replay-protected |
+| **Home Assistant** | MQTT discovery only | **+ custom component [`homekey_household`](https://github.com/CsepregiArtur/homekey-household)**: MQTT **or** a **broker-less**, certificate-pinned HTTPS transport |
+| Web UI | Misc, MQTT, OTA, Logs, Actions | **+ household, node, health, security, audit, backup, recovery, provision, update, guest tags** |
+| **Firmware update** | OTA from the Web UI / GitHub updater | **Dual-slot OTA over the LAN** (rollback-enabled) **or serial** via `scripts/ota_update.py`. No GitHub updater. |
+| **Connectivity** | Wi-Fi **and Ethernet** (W5500, LAN8720, …) | **Wi-Fi only** — the Ethernet driver was removed |
+| **NFC readers** | PN532, PN7160/PN7161, ST25R3916 | **PN532 only** (SPI). The others were removed to free flash for the second OTA slot. |
+| **Compile targets** | ESP32, S3, C3, C6 | **ESP32 and ESP32-C3**, auto-detected when flashing |
 | Audit log | — | Bounded 256-record log |
 | **Flash encryption** | **Disabled** (deliberate) | **Supported** — currently off, AES-256 eFuse key when enabled |
 | **Secure Boot** | **Disabled** | **Supported** — currently off, V1 (ECDSA-P256) when enabled |
 | **NVS encryption** | **Disabled** | **Supported** — currently off, `nvs_keys` partition when enabled |
-| Partition table | `0x8000`, no `nvs_keys` | Same as upstream right now; moves to `0xD000` with `nvs_keys` when enabled |
+| Partition table | `0x8000`, no `nvs_keys` | **Dual-slot `with_ota.csv`**: `app0`/`app1` at 1856 KiB each + `otadata`; moves to `0xD000` with `nvs_keys` when hardening is enabled |
 
 **Unchanged from upstream:** the HomeKey/NFC protocol, `LockManager` lock logic,
-the HomeSpan/HomeKit accessory model, the existing Web UI pages, and all existing
-MQTT topic names and payloads (the household namespace is additive).
+the HomeSpan/HomeKit accessory model, and all existing MQTT topic names and
+payloads (the household namespace is additive).
 
-**Right now this fork boots and flashes exactly like upstream** — no eFuses are
-burned and no device data is lost. The security features are opt-in and documented
-in [`docs/content/PATH2_SECURITY_ROLLOUT.md`](docs/content/PATH2_SECURITY_ROLLOUT.md).
+**Right now this fork boots and flashes without burning any eFuses** — no device
+data is lost. The security features are opt-in and documented in
+[`docs/content/PATH2_SECURITY_ROLLOUT.md`](docs/content/PATH2_SECURITY_ROLLOUT.md).
+
+> [!WARNING]
+> **Three breaking changes if you are migrating from upstream or an older build of
+> this fork.** Ethernet is gone, only PN532 is supported, and the flash layout now
+> has two application slots. All three mean a **serial flash and full
+> re-provisioning** — Wi-Fi credentials, HomeKit pairing and HomeKey enrolment
+> stored on the device are lost. See [Updates](docs/content/updates.md).
 
 ## What is HomeKey-ESP32?
 
@@ -117,85 +161,108 @@ The project aims to be the easy DIY solution for using Apple's HomeKey feature w
 
 ## Getting Started
 
-> [!TIP]
-> A wiki documenting the project can be found at https://rednblkx.github.io/HomeKey-ESP32/
-
 ### Prerequisites
 
-- **ESP32 Development Board**
-- **NFC reader** - one of:
-  - **PN532** (SPI)
-  - **PN7161** (SPI) - available in the dev release
-  - **ST25R3916** (I2C) - available in the dev release
-- **USB Cable** (for flashing and power)
-- **Computer** (Windows, Mac, or Linux)
-- **Basic Electronics Knowledge** (not a problem if you're new to this, ask away!)
+- **ESP32 or ESP32-C3 development board** — both are tested and auto-detected when
+  flashing.
+- **PN532 NFC reader** (SPI mode) — the only supported reader in this fork.
+- **USB cable** (for flashing and power; also needed for the first update if you
+  are coming from the single-slot layout).
+- **Computer** (Windows, Mac, or Linux).
+- **A stable 3.3 V supply** — avoid powering the NFC module from a laptop USB port
+  if you see unstable behaviour.
 
-#### Ethernet
+> [!NOTE]
+> **Ethernet is not supported in this fork.** The upstream driver (W5500, DM9051,
+> KSZ8851, LAN8720 and the other RMII PHYs) was removed. This device is Wi-Fi only.
 
-The following chips are supported for Ethernet:
+#### PN532 wiring — the pins differ per chip
 
--  W5500
--  DM9051
--  KSZ8851
--  LAN8720 / LAN8710
--  TLK110
--  RTL8201
--  DP83848
--  KSZ8041
--  KSZ8081
+The defaults come from the Arduino core's per-chip variant, so they are correct on
+both chips — but do not copy one column to the other.
+
+| PN532 | ESP32 (VSPI) | ESP32-C3 (FSPI) |
+| --- | --- | --- |
+| SCK | GPIO18 | **GPIO4** |
+| MISO | GPIO19 | **GPIO5** |
+| MOSI | GPIO23 | **GPIO6** |
+| SS | GPIO5 | **GPIO7** |
+| VCC | 3V3 | 3V3 |
+| GND | GND | GND |
+
+The PN532 must be in **SPI mode** — on the common red boards, DIP switch `0`/`1`.
 
 > [!IMPORTANT]
->
-> The following are only supported for ESP32-WROOM-32 boards as other variants lack the internal EMAC needed for the RMII interface:
-> -  LAN8720 / LAN8710
-> -  TLK110
-> -  RTL8201
-> -  DP83848
-> -  KSZ8041
-> -  KSZ8081
+> An ESP32-C3 has only GPIO0–21, so the classic ESP32 numbers (18/19/23) **do not
+> exist** on it. On a C3 also avoid GPIO9 (boot mode), GPIO8/GPIO2 (strapping),
+> GPIO18/19 (native USB) and GPIO20/21 (console UART).
+
+See the [detailed wiring guide](docs/content/setup.md#21-nfc-module-wiring) and
+[Prerequisites](docs/content/prerequisites.md).
 
 ### Installation Steps
 
-1. **Download Firmware**
-   - Visit [GitHub Releases](https://github.com/rednblkx/HomeKey-ESP32/releases/latest)
-   - Download the `*.firmware.factory.bin` file
-   - This contains everything you need - no compilation required!
+1. **Get the firmware**
+   - Take the latest from [this fork's Releases](https://github.com/CsepregiArtur/HomeKey-ESP32/releases), or
+   - Build it yourself (see [Building from Source](#building-from-source)).
 
-2. **Connect Your Hardware**
-   - Wire your chosen NFC module to your ESP32 using the default pins
-   - Refer to the [detailed wiring guide](https://rednblkx.github.io/HomeKey-ESP32/setup/#21-nfc-module-wiring) for your specific setup
+2. **Connect your hardware**
+   - Wire the PN532 to your board using the pinout for *your* chip (above).
 
-3. **Flash the Firmware**
-   ```bash
-   # Install esptool (one-time setup)
-   pip install esptool
-   
-   # Flash the firmware (replace YOUR_PORT)
-   esptool.py --port /dev/ttyUSB0 write_flash 0x0 firmware.factory.bin
-   ```
-   
-   **Prefer a GUI?** Use the [browser-based flasher](https://espressif.github.io/esptool-js/) - no command line needed!
+3. **Flash the firmware**
+   - Easiest, and chip-aware:
 
-4. **Initial Setup**
-   - Connect to the device's WiFi AP (`HK_XXXXXX`). The password is `HomeKey$123$` until you set your own on the setup screen.
-   - Access the web interface at `http://192.168.4.1` - type the address, phones do not auto-open the portal
-   - Configure your WiFi credentials, HomeKit setup code and Web UI login
-   - Open the device's Web UI on your network and finish the **first-run setup screen**: Web UI username + password, HomeKit Setup Code and setup AP password. Until you save it the Web UI has **no login**, so only do this on a trusted network.
-   - Pair with Apple Home using the Setup Code you chose (the shipped `466-37-726` applies until you set your own)
+     ```bash
+     ./scripts/ota_update.py
+     ```
+
+     It detects the chip, picks the right bootloader offset and offers to flash
+     over the cable, or to discover devices and update them over the network.
+
+   - Or the plain `esptool` route:
+
+     ```bash
+     pip install esptool
+     esptool.py --port /dev/ttyUSB0 write_flash 0x0 *.firmware.factory.bin
+     ```
+
+   - **Prefer a GUI?** Use the [browser-based flasher](https://espressif.github.io/esptool-js/).
+
+4. **Initial setup**
+   - Connect to the device's Wi-Fi AP (`HK_XXXXXX`). The password is `HomeKey$123$`
+     until you set your own.
+   - Open `http://192.168.4.1` **manually** — phones do not auto-open the portal.
+   - Configure Wi-Fi credentials, your HomeKit Setup Code and the Web UI login.
+   - Open the device's Web UI on your network and finish the **first-run setup
+     screen**: Web UI username + password, HomeKit Setup Code and setup AP
+     password. **Until you save it the Web UI has no login**, so only do this on a
+     trusted network.
+   - Pair in the Apple Home app using the Setup Code you chose (the shipped
+     `466-37-726` applies until then).
 
 > [!NOTE]
-> A factory-fresh device asks you to choose its credentials rather than generating and printing them. See [Security](docs/content/security.md) for the full flow, and for what to do if a credential is lost.
+> A factory-fresh device asks you to choose its credentials rather than generating
+> and printing them. See [Security](docs/content/security.md) for the full flow and
+> for what to do if a credential is lost.
 
-5. **Start Using HomeKey!**
-   - Hold your iPhone or Apple Watch near the NFC reader
-   - Enjoy instant, secure access to your home! 🎉
+5. **Start using HomeKey!**
+   - Hold your iPhone or Apple Watch near the PN532.
+   - Enjoy instant, secure access. 🎉
 
 ### Updating
 
-Follow the update in the documentation at: https://rednblkx.github.io/HomeKey-ESP32/updates/
+Two paths — **over the cable** or **over the network** — documented in full at
+[`docs/content/updates.md`](docs/content/updates.md).
 
-Review [CHANGELOG.md](CHANGELOG.md) before updating: some releases change security defaults or the update procedure itself (for example, the firmware has to be updated before the filesystem image). The [Security](docs/content/security.md) page explains the first-run setup flow and how to recover a lost credential.
+**Moving onto the current dual-slot layout needs one serial flash.** A partition
+table cannot be delivered over the air: the old table is what tells the device
+where to write the new image, and it does not describe the new slots. After that
+one cable, every later firmware update can be wireless.
+
+Review [`CHANGELOG.md`](CHANGELOG.md) before updating: some releases change the
+flash layout or the security defaults. The
+[Security](docs/content/security.md) page explains the first-run setup flow and how
+to recover a lost credential.
 
 ## System Architecture
 
@@ -245,7 +312,8 @@ graph TD
 - **Svelte Frontend**: Responsive, modern UI built with Svelte 5 + Tailwind CSS
 - **Real-time Updates**: WebSocket-powered live status updates
 - **Configuration Management**: Easy setup without recompiling
-- **Serial-only updates**: no over-the-air path by design, so nothing on the network can replace the firmware
+- **LAN OTA updates**: dual-slot with automatic rollback, or serial when you have
+  physical access
 
 ### **Developer Friendly**
 - **Open Source**: MIT licensed, community-driven development
@@ -340,63 +408,116 @@ graph TD
 ```
 HomeKey-ESP32/
 ├── main/                    # Core ESP32 application
-│   ├── main.cpp            # Application entry point
+│   ├── main.cpp             # Application entry point
 │   ├── ConfigManager.cpp    # Configuration management
 │   ├── ReaderDataManager.cpp # Reader data management
-│   ├── NfcManager.cpp      # NFC communication
-│   ├── Pn532Reader.cpp     # PN532 backend (SPI)
-│   ├── Pn7160Reader.cpp    # PN7160 backend
-│   ├── St25r3916Reader.cpp # ST25R3916 backend (I2C)
-│   ├── HomeKitLock.cpp     # HomeKit integration
-│   ├── LockManager.cpp     # Lock state management
-│   ├── MqttManager.cpp     # MQTT client
+│   ├── NfcManager.cpp       # NFC communication
+│   ├── Pn532Reader.cpp      # PN532 backend (SPI) — the only reader in this fork
+│   ├── HomeKitLock.cpp      # HomeKit integration
+│   ├── LockManager.cpp      # Lock state management
+│   ├── MqttManager.cpp      # MQTT client
 │   ├── WebServerManager.cpp # Web interface
-│   ├── WebSocketLogSinker.cpp # WebSocket logging sinker
-│   ├── HardwareManager.cpp # Hardware manager
-│   └── HKServices.cpp # HomeKit services
-├── data/                   # Web interface files
-│   ├── src/               # Vue.js application
-│   └── index.html         # Web UI entry point
-├── components/            # External dependencies
-│   ├── HK-HomeKit-Lib/   # HomeKey implementation
-│   ├── HomeSpan/         # HomeKit framework
-│   └── PN532/            # NFC driver
-└── docs/                 # Documentation
-    └── content/          # Hugo documentation
+│   ├── HardwareManager.cpp  # Hardware manager
+│   ├── HouseholdManager.cpp # Household state and trust anchor
+│   ├── NodeIdentityManager.cpp # Per-node Ed25519 identity
+│   ├── AuditManager.cpp     # Security event log
+│   └── HKServices.cpp       # HomeKit services
+├── data/                    # Web interface files (Svelte 5)
+├── components/              # External dependencies (HomeSpan, HK-HomeKit-Lib, PN532)
+├── scripts/
+│   ├── ota_update.py        # Cable + network updater, chip auto-detection
+│   └── build_esp32c3.sh     # C3 build wrapper (RISC-V assembler workaround)
+├── tests/                   # Host-side test scripts
+├── with_ota.csv             # ACTIVE partition table (dual-slot)
+├── no_ota.csv               # Single-slot fallback
+└── docs/                    # Hugo documentation site
+    └── content/             # The pages published at the URL above
 ```
 
 ### Core Components
 
 | Component | File | Purpose |
 |-----------|------|---------|
-| **NFC Manager** | [`NfcManager.cpp`](main/NfcManager.cpp) | Drives the selected NFC backend and HomeKey authentication |
-| **NFC Backends** | [`Pn532Reader.cpp`](main/Pn532Reader.cpp) / [`Pn7160Reader.cpp`](main/Pn7160Reader.cpp) / [`St25r3916Reader.cpp`](main/St25r3916Reader.cpp) | Reader implementations behind the common `INfcReader` interface |
+| **NFC Manager** | [`NfcManager.cpp`](main/NfcManager.cpp) | Drives the PN532 backend and HomeKey authentication |
+| **NFC Backend** | [`Pn532Reader.cpp`](main/Pn532Reader.cpp) | PN532 implementation behind the `INfcReader` interface |
 | **HomeKit Bridge** | [`HomeKitLock.cpp`](main/HomeKitLock.cpp) | Manages Apple HomeKit integration and pairing |
 | **Lock Manager** | [`LockManager.cpp`](main/LockManager.cpp) | Controls lock state transitions and GPIO actions |
-| **MQTT Client** | [`MqttManager.cpp`](main/MqttManager.cpp) | Enables smart home integration via MQTT |
-| **Web Server** | [`WebServerManager.cpp`](main/WebServerManager.cpp) | Provides the configuration UI and the Home Assistant direct API |
-| **Config Manager** | [`ConfigManager.cpp`](main/ConfigManager.cpp) | Handles persistent configuration storage |
+| **MQTT Client** | [`MqttManager.cpp`](main/MqttManager.cpp) | Smart home integration via MQTT |
+| **Web Server** | [`WebServerManager.cpp`](main/WebServerManager.cpp) | Configuration UI, HA direct API, and the OTA endpoints |
+| **Config Manager** | [`ConfigManager.cpp`](main/ConfigManager.cpp) | Persistent configuration storage |
 
 ### Building from Source
 
+Requires **ESP-IDF v5.4 or newer** (CI builds against v5.5.4). Earlier versions do
+not compile: the NFC components use `esp_log_buffer.h` and
+`spi_bus_dma_memory_alloc`, both introduced in v5.4. See the
+[ESP-IDF getting started guide](https://docs.espressif.com/projects/esp-idf/en/latest/esp32/get-started/index.html).
+
 ```bash
-# Install dependencies
+# 1. Dependencies
 git submodule update --init --recursive
 
-# Install esp-idf v5.4 or newer -- CI builds against v5.5.4.
-# Earlier versions do not compile: the pn7160 and pn532_hal components use
-# esp_log_buffer.h and spi_bus_dma_memory_alloc, both introduced in v5.4.
-# See https://docs.espressif.com/projects/esp-idf/en/latest/esp32/get-started/index.html#get-started
+# 2. ESP-IDF
+. $HOME/esp/esp-idf/export.sh
 
-# Build firmware
+# 3. Build (classic ESP32)
 idf.py build
 
-# Flash to device
-idf.py -p /dev/ttyUSB0 flash
-
-# Monitor output
-idf.py monitor
+# 4. Flash and monitor
+idf.py -p /dev/ttyUSB0 flash monitor
 ```
+
+#### Building for the ESP32-C3
+
+The RISC-V toolchain is not installed by default, and on macOS/Homebrew hosts the
+build needs one extra step. **Use the wrapper**, which handles both:
+
+```bash
+./scripts/build_esp32c3.sh set-target   # one time; wipes build/
+./scripts/build_esp32c3.sh build
+```
+
+If you build by hand instead, on a macOS/Homebrew host the assembly step fails with
+a message that names the wrong component:
+
+```
+clang: error: unknown argument: '--traditional-format'
+```
+
+GCC *is* running; what breaks is the **assembler**. IDF's `riscv32-esp-elf-as` is a
+Rust dispatcher that selects between `riscv32-esp-elf-as-xespv1/v2p1/v2p2`. When it
+cannot resolve its variant, GCC's `-print-prog-name=as` reports the bare name `as`,
+which the OS resolves to `/usr/bin/as` — Apple clang — which rejects RISC-V flags.
+The wrapper puts a directory on `PATH` whose `as` points at the real GNU assembler,
+bypassing the dispatcher. Full explanation in
+[`docs/content/updates.md`](docs/content/updates.md).
+
+> [!WARNING]
+> An interrupted `idf_tools.py install` can leave `riscv32-esp-elf/include/`
+> **empty** (0 headers instead of ~72), which later surfaces as
+> `fatal error: string.h: No such file or directory`. Reinstall the toolchain to fix
+> it. Check with `ls <toolchain>/riscv32-esp-elf/include | wc -l`.
+
+#### Flash budget
+
+| Target | Image size | Free in slot | Headroom |
+| --- | --- | --- | --- |
+| `esp32` | 1,752,256 B | 148,288 B | **7.80 %** |
+| `esp32c3` | 1,870,176 B | 30,368 B | **1.60 %** |
+
+The C3 build is ~118 KB larger and its dual-slot headroom is thin. If size becomes a
+problem, `no_ota.csv` is the escape hatch — a single slot with far more room, but no
+OTA.
+
+#### Web interface
+
+```bash
+cd data && npm install && npm run build
+```
+
+`npm run check` (svelte-check) must report 0 errors. `npx eslint src/` reports a
+number of pre-existing `no-explicit-any` errors; CI does not run eslint, so leave
+those alone and keep new files clean.
 
 ### Contributing
 
@@ -420,10 +541,29 @@ HomeKey-ESP32 is openly developed and maintained by the community. Your support 
 
 ## Credits
 
+### Original project
+
+This repository is a **fork of [rednblkx/HomeKey-ESP32](https://github.com/rednblkx/HomeKey-ESP32)**,
+which is the original work. All core HomeKey, NFC, HomeKit and Web UI functionality
+was designed and built there, and this fork builds directly on it under the MIT
+licence.
+
+- **Original project:** <https://github.com/rednblkx/HomeKey-ESP32>
+- **Original documentation:** <https://rednblkx.github.io/HomeKey-ESP32/>
+
+Please send upstream bugs and upstream documentation feedback to the original
+project. The documentation published for *this fork* is at
+<https://csepregiartur.github.io/HomeKey-ESP32/> and its sources are in
+[`docs/content/`](docs/content).
+
+### Built on
+
 - **[@kormax](https://github.com/kormax)**: Reverse-engineered the HomeKey NFC protocol and published the foundational [PoC implementation](https://github.com/kormax/apple-home-key-reader)
 - **[@kupa22](https://github.com/kupa22)**: Researched the HAP (HomeKit Accessory Protocol) side of HomeKey
 - **[HomeSpan](https://github.com/HomeSpan/HomeSpan)**: Excellent HomeKit framework that powers our integration
+- **[HK-HomeKit-Lib](https://github.com/rednblkx/HK-HomeKit-Lib)**: The HomeKey protocol library
 - **[ESP-IDF](https://github.com/espressif/esp-idf)**: Robust IoT development framework from Espressif
+- **Discord**: <https://discord.com/invite/VWpZ5YyUcm>
 
 ## License & Legal
 

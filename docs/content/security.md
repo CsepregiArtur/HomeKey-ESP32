@@ -1,6 +1,6 @@
 ---
 title: Security
-weight: 9
+weight: 11
 ---
 
 HomeKey-ESP32 controls a door lock, so it is worth being explicit about what it protects, what it does not, and how to deploy it safely. This page is the reference for that: threat model, the hardening that ships with the firmware, and the decisions that are deliberately left to you.
@@ -47,7 +47,7 @@ These protections are active without any configuration:
 
 * **Secrets are never sent to the browser.** Configuration reads return `********` for every `*Password`/`*Passwd` field, and the write path refuses to store that placeholder, so a stale form cannot overwrite a real password with the mask.
 
-* **There is no over-the-air update path at all.** The single-slot flash layout has one application partition and no OTA data partition, so no image can be written over the network and there is no second slot to switch to afterwards. HomeSpan's OTA service is never enabled, the OTA password is gone, and the `/ota/*` upload endpoints and the "update from GitHub" routes do not exist. **That removes a whole class of risk: nothing reachable over the network can replace this device's firmware - signed or not.** Firmware and the web UI image are installed over serial; see [Single-slot layout](single_slot_layout).
+* **Firmware updates can arrive over the network, and that surface is deliberately narrow.** The device uses a **dual-slot** flash layout (`with_ota.csv`): two application partitions and an `otadata` selector, so a new image is written into the slot the device is *not* running from. Uploading is `POST /api/ota/firmware`, which requires **both** Web UI authentication (`basicAuth()`) and **HTTPS** (`haRequireTls()`) — a plain-HTTP upload is refused. The image is validated with `esp_ota_end()` before it is ever made bootable, and `CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y` means a newly flashed image that fails to confirm itself is abandoned in favour of the previous slot on the next reset. There is **no** "update from GitHub" route and the device never fetches firmware on its own — an update only happens when an authenticated caller pushes one. See [Updates](updates).
 
 * **The setup access point password is the documented default until you change it.** Two APs can appear while a device has no network: the project's own `HK_XXXXXX` captive portal and HomeSpan's `HomeSpan-Setup`. Both use the setup AP password so they cannot be opened with two different published values. On a device that has not been through first-run setup that value is `HomeKey$123$`, so **set your own on the setup screen** - the AP only exists before the device is provisioned, but it is still a way in while it is up.
 

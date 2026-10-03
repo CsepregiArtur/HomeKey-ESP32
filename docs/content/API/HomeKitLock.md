@@ -4,7 +4,10 @@ title: "HomeKitLock"
 
 ## 1. Overview
 
-The `HomeKitLock` class serves as the central bridge between the application's core logic and the Apple HomeKit ecosystem, facilitated by the HomeSpan library. It is designed as a singleton and is responsible for initializing the HomeKit accessory, defining its services and characteristics, managing the network connection (Wi-Fi or Ethernet), and synchronizing the lock's state with HomeKit.
+The `HomeKitLock` class serves as the central bridge between the application's core logic and the Apple HomeKit ecosystem, facilitated by the HomeSpan library. It is designed as a singleton and is responsible for initializing the HomeKit accessory, defining its services and characteristics, managing the Wi-Fi network connection, and synchronizing the lock's state with HomeKit.
+
+> [!NOTE]
+> **This fork is Wi-Fi only.** Upstream's `HomeKitLock` also initialized an Ethernet connection (`initializeETH()`, with a fallback to Wi-Fi) and delegated to an `EthernetDriver` module. Both were removed here — see [EthernetDriver](ethernetdriver) and [Fork vs Upstream](../fork-vs-upstream).
 
 A critical function of this class is managing the lifecycle of HomeKey issuers. It listens for changes in paired HomeKit controllers and automatically updates the `NvsCredentialStore` with the necessary cryptographic keys (LTPK), ensuring that newly paired devices can use HomeKey.
 
@@ -13,7 +16,7 @@ A critical function of this class is managing the lifecycle of HomeKey issuers. 
 *   **HomeSpan Initialization:** Configures and starts the HomeSpan framework, setting up the device as a HomeKit lock accessory.
 *   **Accessory Definition:** Creates all necessary HomeKit services, including the Lock Mechanism, Lock Management, NFC Access, and an optional Battery Service.
 *   **State Synchronization:** Subscribes to internal application events to update the lock's current state, target state, and battery status in HomeKit in real-time.
-*   **Network Management:** Handles the initialization of an Ethernet connection if configured, with a fallback to Wi-Fi managed by HomeSpan.
+*   **Network Management:** Relies on Wi-Fi managed by HomeSpan. This fork has no Ethernet path.
 *   **HomeKey Issuer Management:** Automatically synchronizes the list of trusted HomeKey issuers with the list of paired HomeKit admin controllers.
 *   **Debug Interface:** Provides a set of serial commands for runtime debugging and diagnostics.
 
@@ -49,7 +52,7 @@ Initializes and starts all HomeKit-related services. This is the main entry poin
 
 **It performs the following key actions:**
 1.  Configures HomeSpan settings (e.g., control pin, status pin, device name) from `ConfigManager`.
-2.  Calls `initializeETH()` to set up the Ethernet connection if enabled.
+2.  Starts the Wi-Fi connection through HomeSpan.
 3.  Starts the HomeSpan stack, advertising the device as a HomeKit lock.
 4.  Builds the accessory hierarchy, adding all required and optional services (Lock Mechanism, NFC Access, Battery Service, etc.).
 5.  Registers callbacks for HomeSpan events, such as connection changes and controller list modifications.
@@ -90,14 +93,13 @@ void updateBatteryStatus(uint8_t batteryLevel, bool isLow);
 
 ## 3. Network Management
 
-#### `initializeETH()`
+#### `initializeETH()` — removed
 
-Delegates Ethernet initialization to the `EthernetDriver` module, passing the miscellaneous configuration. If Ethernet is disabled, `EthernetDriver::start()` is a no-op, allowing HomeSpan to manage the Wi-Fi connection instead. All pin leasing, preset/custom configuration handling, and lifecycle event broadcasting live in `EthernetDriver` (see [EthernetDriver](../ethernetdriver/)).
-
-**Signature:**
-```cpp
-void initializeETH();
-```
+> [!NOTE]
+> This method **does not exist in this fork.** Upstream used it to hand off Ethernet
+> bring-up to the `EthernetDriver` module; with both Ethernet and that module removed,
+> there is nothing to initialize. HomeSpan manages the Wi-Fi connection directly.
+> See [EthernetDriver](ethernetdriver).
 
 ## 4. Core Logic & Callbacks
 

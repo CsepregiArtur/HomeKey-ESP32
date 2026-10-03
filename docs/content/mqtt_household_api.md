@@ -1,6 +1,6 @@
 ---
 title: "MQTT Household API"
-weight: 7
+weight: 13
 ---
 
 # MQTT Household API
@@ -51,7 +51,7 @@ Example `.../state`:
 ```json
 {"household_id":"HOUSE-7F42","node_id":"GATE-001","node_name":"Gate",
  "node_role":"gate","node_state":"ACTIVE","generation":1,
- "firmware_version":"0.10.0"}
+ "firmware_version":"0.12.0"}
 ```
 
 Example `.../health`:
@@ -59,7 +59,7 @@ Example `.../health`:
 ```json
 {"network":"UNKNOWN","mqtt":"OK","mqtt_error":0,"nfc":"OK",
  "lock_current":1,"lock_target":1,"backup":"ok","certificate":"unknown",
- "firmware_version":"0.10.0","uptime":1234,"free_heap":123456,
+ "firmware_version":"0.12.0","uptime":1234,"free_heap":123456,
  "reset_reason":"1","security":{"all_ok":false,"warnings":"..."}}
 ```
 

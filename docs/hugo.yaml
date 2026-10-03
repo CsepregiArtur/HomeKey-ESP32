@@ -79,5 +79,5 @@ params:
     displayToggle: true
   editURL:
     enable: true
-    base: "https://github.com/rednblkx/HomeKey-ESP32/edit/main/docs/content"
+    base: "https://github.com/CsepregiArtur/HomeKey-ESP32/edit/main/docs/content"
 

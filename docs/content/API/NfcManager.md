@@ -37,10 +37,10 @@ NfcManager(NvsCredentialStore& readerDataManager,
 
 **Parameters:**
 *   `readerDataManager`: A reference to the `NvsCredentialStore`, which provides the necessary reader data (like the Reader GID) for HomeKey operations.
-*   `nfcGpioPins`: An array of four GPIO pin numbers. For SPI readers (PN532, PN7161) these are SS/SCK/MISO/MOSI; for the I2C reader (ST25R3916) only entries 0 and 1 are used, as SDA and SCL.
-*   `nfcReaderType`: The reader backend to instantiate: `0` = PN532 (SPI), `1` = PN7160/PN7161 (SPI), `2` = ST25R3916 (I2C).
-*   `nfcIrqPin`: The IRQ pin for the PN7161 (255 = unset; required for reader type 1).
-*   `nfcVenPin`: The VEN (enable/reset) pin for the PN7161 (255 = unset; required for reader type 1).
+*   `nfcGpioPins`: An array of four GPIO pin numbers, in **SS/SCK/MISO/MOSI** order for the PN532 (SPI).
+*   `nfcReaderType`: The reader backend to instantiate. **Only `0` = PN532 (SPI) is supported in this fork**; the PN7160/PN7161 (`1`) and ST25R3916 (`2`) backends were removed.
+*   `nfcIrqPin`: Legacy IRQ pin slot, kept for signature compatibility with upstream. Only the PN7161 used it, and that backend is gone, so it is unused (`255` = unset).
+*   `nfcVenPin`: Legacy VEN (enable/reset) pin slot, kept for signature compatibility. Also PN7161-only and therefore unused (`255` = unset).
 *   `hkAuthPrecomputeEnabled`: Whether to enable authentication precomputation for faster response times.
 *   `nfcFastPollingEnabled`: Whether to use a reduced delay between poll cycles for faster tag detection.
 
