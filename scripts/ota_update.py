@@ -56,6 +56,38 @@ FLASH_OFFSETS = {
     "app": 0x20000,  # replaced by the real offset from the partition table
 }
 
+
+def flash_layout() -> dict[str, int]:
+    """Where each image belongs, as the current build decided.
+
+    The bootloader offset is NOT the same on every chip: a classic ESP32 puts it at
+    0x1000, while an ESP32-C3 (and the other RISC-V parts) put it at 0x0. Writing a C3
+    bootloader to 0x1000 leaves the chip with no valid bootloader and it prints
+    `invalid header: 0xffffffff` forever, so this is read from the build's own
+    `flash_args` rather than assumed. The keys are the file names IDF emits there.
+    """
+    layout = dict(FLASH_OFFSETS)
+    args = BUILD_DIR / "flash_args"
+    if not args.exists():
+        return layout
+
+    known = {
+        "bootloader/bootloader.bin": "bootloader",
+        "partition_table/partition-table.bin": "partition-table",
+    }
+    for line in args.read_text().splitlines():
+        line = line.strip()
+        if line.startswith("--") or not line:
+            continue
+        parts = line.split()
+        if len(parts) != 2:
+            continue
+        offset, path = parts
+        key = known.get(path)
+        if key:
+            layout[key] = int(offset, 0)
+    return layout
+
 MDNS_SERVICE = "_homekey._tcp"
 KEYCHAIN_SERVICE = "homekey-esp32-ota"
 DEFAULT_KEYCHAIN_ACCOUNT = "web-ui"
@@ -64,10 +96,11 @@ DEFAULT_BAUD = 460800
 # default at the other end of the cable is plain 115200.
 FALLBACK_BAUD = 115200
 
-# Targets this project is set up to build. Anything else needs its RISC-V toolchain
-# installed and a toolchain-clang/cmake combination this tree has not been tested with;
-# see the note in the compile-targets section of docs/content/updates.md.
-SUPPORTED_TARGETS = ("esp32",)
+# Targets this project is set up to build. esp32 (Xtensa) builds directly; esp32c3 works
+# on macOS hosts after the RISC-V toolchain is installed AND an assembler shim is used,
+# see scripts/build_esp32c3.sh for why. Everything else would need both plus review of the
+# pin defaults, since the NFC wiring differs per chip.
+SUPPORTED_TARGETS = ("esp32", "esp32c3")
 
 SECRET_KEYS = ("password", "passwd", "secret", "token", "psk")
 
@@ -111,13 +144,29 @@ def redact(obj):
 
 
 def ask(prompt: str, *, default: bool | None = None) -> bool:
-    """Yes/no question. `default` decides what a bare Enter means."""
+    """Yes/no question. `default` decides what a bare Enter means.
+
+    Falls back to `default` when there is no terminal to read from, so a scripted run
+    (piped input, cron, a captured log) does not die with EOFError halfway through its
+    work. Passing no default and having no terminal is a programming error, not a user
+    error, so it raises.
+    """
+    if not sys.stdin.isatty():
+        if default is None:
+            die(f"cannot ask '{prompt}' without a terminal; pass the matching flag")
+        return default
+
     if default is None:
         suffix = "[y/n]"
     else:
         suffix = "[Y/n]" if default else "[y/N]"
     while True:
-        answer = input(f"{prompt} {suffix} ").strip().lower()
+        try:
+            answer = input(f"{prompt} {suffix} ").strip().lower()
+        except EOFError:
+            if default is None:
+                raise
+            return default
         if not answer:
             if default is not None:
                 return default
@@ -807,9 +856,12 @@ def serial_flash(port: str, layout: Path, *, with_fs: bool, chip: str | None = N
         die(f"{layout} has no app0 partition")
     app_offset = table["app0"][0]
 
+    # Chip-specific: the bootloader is at 0x0 on a C3 and 0x1000 on a classic ESP32.
+    offsets = flash_layout()
+
     writes = [
-        (FLASH_OFFSETS["bootloader"], BOOTLOADER_BIN),
-        (FLASH_OFFSETS["partition-table"], PARTITION_BIN),
+        (offsets["bootloader"], BOOTLOADER_BIN),
+        (offsets["partition-table"], PARTITION_BIN),
         (app_offset, APP_BIN),
     ]
     if with_fs:
@@ -855,6 +907,27 @@ def serial_flash(port: str, layout: Path, *, with_fs: bool, chip: str | None = N
             say(f"  {baud} baud failed, retrying at {FALLBACK_BAUD} baud")
 
     return False
+
+
+def rebuild_for(target: str) -> bool:
+    """Switch the build to `target` and compile it.
+
+    esp32c3 needs the assembler shim described in scripts/build_esp32c3.sh, because
+    IDF's `riscv32-esp-elf-as` is a Rust dispatcher that fails to resolve its real
+    assembler on this host and the OS then falls back to Apple's `as`, which rejects
+    RISC-V flags. Calling `idf.py set-target` directly would fail, so the helper is
+    used when it exists.
+    """
+    if target != "esp32":
+        helper = REPO_ROOT / "scripts" / f"build_{target}.sh"
+        if helper.exists():
+            for step in ("set-target", "build"):
+                if subprocess.run([str(helper), step]).returncode != 0:
+                    return False
+            return True
+    if subprocess.run(["idf.py", "set-target", target]).returncode != 0:
+        return False
+    return subprocess.run(["idf.py", "build"]).returncode == 0
 
 
 def flash_over_cable(args: argparse.Namespace) -> int:
@@ -913,10 +986,8 @@ def flash_over_cable(args: argparse.Namespace) -> int:
         if not args.yes and not ask(f"Rebuild for {detected.chip} now?", default=True):
             say("Nothing to do.")
             return 0
-        if subprocess.run(["idf.py", "set-target", detected.chip]).returncode != 0:
-            die(f"`idf.py set-target {detected.chip}` failed")
-        if subprocess.run(["idf.py", "build"]).returncode != 0:
-            die("`idf.py build` failed")
+        if not rebuild_for(detected.chip):
+            die(f"could not build for {detected.chip}")
         say("")
 
     if not args.yes:
@@ -1141,10 +1212,8 @@ def main() -> int:
                 f"docs/content/updates.md before adding one."
             )
         say(f"Rebuilding for {args.target} ...")
-        if subprocess.run(["idf.py", "set-target", args.target]).returncode != 0:
-            die(f"`idf.py set-target {args.target}` failed")
-        if subprocess.run(["idf.py", "build"]).returncode != 0:
-            die("`idf.py build` failed")
+        if not rebuild_for(args.target):
+            die(f"could not build for {args.target}")
         say("")
 
     # Decide the flow. An explicitly attached cable wins when the script is not

@@ -11,6 +11,25 @@ layout needs one serial flash**; after that, updates are wireless.
 
 ### Added
 
+* **ESP32-C3 support.** The firmware builds and runs on an ESP32-C3, and the update script
+  detects the chip on the cable and flashes the right images for it. Two things are chip
+  specific and both are handled:
+  * **The bootloader offset is not the same.** A classic ESP32 puts it at `0x1000`, a C3 at
+    `0x0`. Writing a C3 bootloader to `0x1000` leaves the chip printing
+    `invalid header: 0xffffffff` forever. The script reads the offset from the build's own
+    `flash_args` instead of assuming.
+  * **The NFC pins differ.** The classic ESP32 uses VSPI on GPIO18/19/23/5, but a C3 only has
+    GPIO0-21, so three of those pins do not exist there. The C3 defaults are `SCK=4, MISO=5,
+    MOSI=6, SS=7`. The values come from the Arduino core's variant for the selected chip, so
+    they follow the target automatically - but wiring must not be copied between boards.
+  * `scripts/build_esp32c3.sh` works around a **macOS/Homebrew host problem** where IDF's
+    `riscv32-esp-elf-as` (a Rust dispatcher) fails to resolve its real assembler and the OS
+    falls back to Apple's `as`, which rejects RISC-V flags with
+    `clang: error: unknown argument: '--traditional-format'`. The cause is the assembler, not
+    the compiler, despite what the message implies. The helper puts a correct `as` on `PATH`.
+  * **The C3 image is ~118 KB bigger** (1,870,176 B vs 1,752,256 B), so its dual-slot headroom
+    is thin: 30,368 B (1.60%) against the classic ESP32's 148,288 B (7.80%).
+
 * **Firmware updates over the network are back, without a web UI for them.** The flash layout
   returns to two application slots (`ota_0`/`ota_1`) plus `otadata`, so an image is written into
   the slot the device is *not* running from and a corrupt upload leaves the running firmware

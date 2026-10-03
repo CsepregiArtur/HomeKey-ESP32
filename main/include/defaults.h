@@ -1,6 +1,16 @@
 #include <pins_arduino.h>
 
 // NFC Module Pins
+//
+// Taken from the Arduino core's variant for the selected chip, so the defaults are the
+// chip's own SPI bus rather than one chip's pin numbers applied to all of them. This
+// matters because the pin numbers are not portable: the classic ESP32 uses VSPI on
+// GPIO18/19/23/5, but an ESP32-C3 only has GPIO0-21, so GPIO18/19/23 do not exist there
+// at all and a wiring table copied from one board silently produces a dead bus on the
+// other. The C3 variant defines SCK=4/MISO=5/MOSI=6/SS=7.
+//
+// Check the values for a given chip with:
+//   managed_components/espressif__arduino-esp32/variants/<target>/pins_arduino.h
 #define SS_PIN SS // Slave Select Pin for SPI communication
 #define MISO_PIN MISO // Master In, Slave Out Pin for SPI communication
 #define MOSI_PIN MOSI // Master Out, Slave In Pin for SPI communication

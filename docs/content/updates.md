@@ -155,28 +155,83 @@ answer at all. If neither finds anything, pass `--port` and use the cable.
 
 The script detects the chip on the other end of the cable and refuses to write an
 image built for a different one, because that produces a reset loop rather than an
-error message. **Only `esp32` (the original, Xtensa) is buildable from this tree as
-it is configured.**
+error message.
 
-An **ESP32-C3** is detected correctly - the script reports
-`ESP32-C3 (QFN32) (revision v0.4) 4MB flash` - but then stops with an explanation,
-because the host build does not match:
+| Target | Builds | NFC pins |
+|---|---|---|
+| `esp32` (Xtensa) | directly | 18 / 19 / 23 / 5 (VSPI) |
+| `esp32c3` (RISC-V) | via `scripts/build_esp32c3.sh` | **4 / 5 / 6 / 7** (FSPI) |
 
-* The RISC-V toolchain is not part of a default ESP-IDF install:
-  `python "$IDF_PATH/tools/idf_tools.py" install riscv32-esp-elf`.
-* Even installed, the compile fails in this environment. `tools/cmake/toolchain-esp32c3.cmake`
-  sets `_CMAKE_TOOLCHAIN_PREFIX riscv32-esp-elf-` and IDF's `toolchain.cmake` then
-  assigns the bare name (`set(CMAKE_C_COMPILER riscv32-esp-elf-gcc)`). CMake 4.4
-  (Homebrew) resolves that to Apple's `clang` and the compile dies with
-  `clang: error: unknown argument: '--traditional-format'`. Forcing `CC`/`CXX` to
-  full paths does not override it, because the toolchain file sets them itself.
+**The pin numbers are not portable.** The classic ESP32 uses VSPI on
+GPIO18/19/23/5; an ESP32-C3 only has GPIO0-21, so 18/19/23 **do not exist** there.
+The defaults come from the Arduino core's variant for the selected chip, so they
+are correct per target automatically - but a wiring table copied from one board
+produces a dead bus on the other. Check the values with:
 
-So a C3 build needs a host-side fix first (a CMake that resolves the RISC-V prefix,
-or an `-DCMAKE_C_COMPILER=<absolute path>` passed into the configure step). The
-board's own flash is not the constraint: its 4 MB matches `with_ota.csv` exactly.
+```
+managed_components/espressif__arduino-esp32/variants/<target>/pins_arduino.h
+```
 
-To add a target once that is sorted out, add it to `SUPPORTED_TARGETS` in
-`scripts/ota_update.py`, which currently gates `--target` and the automatic rebuild.
+On a C3 also avoid GPIO9 (boot mode), GPIO8/GPIO2 (strapping), GPIO18/19 (native
+USB) and GPIO20/21 (console UART).
+
+### Building for the ESP32-C3 on macOS
+
+`idf.py set-target esp32c3` fails on a Homebrew CMake host with a message that
+points at the wrong thing:
+
+```
+clang: error: unknown argument: '--traditional-format'
+clang: error: unsupported argument 'rv32imafdc_zicsr_zifencei' to option '-march='
+```
+
+The RISC-V GCC is running and is fine; the **assembler** step is what fails.
+IDF's `riscv32-esp-elf-as` is not binutils but a small Rust dispatcher that picks
+between `riscv32-esp-elf-as-xespv1/v2p1/v2p2` (the real GNU assembler). When it
+cannot resolve its variant it exits non-zero, GCC's `-print-prog-name=as` reports
+the bare name `as`, and the OS resolves that to `/usr/bin/as`, which is Apple
+clang - which then rejects RISC-V flags.
+
+Two things fix it, both on the host:
+
+1. **Install the toolchain** (it is not part of a default ESP-IDF install):
+   ```bash
+   python "$IDF_PATH/tools/idf_tools.py" --non-interactive install riscv32-esp-elf
+   ```
+2. **Put a correct `as` on `PATH`**, bypassing the dispatcher:
+   ```bash
+   ./scripts/build_esp32c3.sh set-target
+   ./scripts/build_esp32c3.sh build
+   ```
+
+`scripts/ota_update.py` calls that helper automatically when it needs to rebuild
+for a detected C3, so `--target esp32c3` and the interactive rebuild both work.
+
+> If an *interrupted* `idf_tools.py install` is resumed, check the toolchain is
+> complete before blaming anything else: a partial install leaves
+> `riscv32-esp-elf/include/` empty and the build fails with
+> `fatal error: string.h: No such file or directory`. `ls` the directory - it
+> should hold ~72 headers, not 0.
+
+### The bootloader is not at the same offset
+
+A classic ESP32 puts its bootloader at **0x1000**; an **ESP32-C3 puts it at 0x0**.
+Writing a C3 bootloader to 0x1000 leaves the chip printing
+`invalid header: 0xffffffff` forever. The script reads the offset from the build's
+own `flash_args`, so this is handled - but it is why a flash is not just "the same
+command with a different `--chip`".
+
+### Flash budget
+
+| | esp32 | esp32c3 |
+|---|---|---|
+| image | 1,752,256 B | 1,870,176 B |
+| slot free (dual-slot) | 148,288 B (7.80%) | **30,368 B (1.60%)** |
+
+The C3 build is ~118 KB larger and its application slot fits with very little room
+to spare. If a C3 build starts failing on size, `no_ota.csv` (one 3840 KiB slot)
+is the way out, at the cost of network updates.
+
 
 
 ## 3. From a build
