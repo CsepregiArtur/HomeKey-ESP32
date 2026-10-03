@@ -13,8 +13,8 @@ HomeKey-ESP32 controls a door lock, so it is worth being explicit about what it 
 > board stays fully reversible. Turning them on changes the physical-access threat
 > model and makes a serial re-flash mandatory; it is a deferred, staged, one-way
 > rollout described in
-> [Security Rollout Plan: Path 1 → Path 2](PATH2_SECURITY_ROLLOUT). See also
-> [Fork vs Upstream](fork-vs-upstream#4-security-model--the-biggest-difference).
+> [Security Rollout Plan: Path 1 → Path 2](path2_security_rollout). See also
+> [Fork vs Upstream](/HomeKey-ESP32/fork-vs-upstream/#6-security-model--the-other-big-difference).
 
 ## Threat model
 
@@ -197,7 +197,7 @@ This fork enables all three, unlike upstream:
 > [!IMPORTANT]
 > **All three of these are currently DISABLED in `sdkconfig.defaults`.** The
 > settings below describe what enabling them does; the actual staged procedure
-> lives in **[Security Rollout Plan: Path 1 → Path 2](PATH2_SECURITY_ROLLOUT)**.
+> lives in **[Security Rollout Plan: Path 1 → Path 2](path2_security_rollout)**.
 
 The original ESP32 only supports **Secure Boot V1**, which requires an **ECDSA-P256** key; RSA-based Secure Boot V2 is not available on this chip.
 
@@ -226,7 +226,7 @@ how much freedom you keep. Pick deliberately — the eFuse burn cannot be undone
 > **This fork currently ships with both features DISABLED ("Path 1").** The board
 > is fully reversible and no eFuse has been burned. Turning them on is **Path 2**,
 > a deferred one-way rollout with its own staged procedure and prerequisites:
-> see **[Security Rollout Plan: Path 1 → Path 2](PATH2_SECURITY_ROLLOUT)**.
+> see **[Security Rollout Plan: Path 1 → Path 2](path2_security_rollout)**.
 > Do not enable anything below until that document's prerequisites are met.
 
 | # | Option | What it does | Reversible? |
@@ -260,7 +260,7 @@ CONFIG_SECURE_FLASH_ENCRYPTION_MODE_DEVELOPMENT=y
 > off-machine before Stage 1 of the rollout.
 >
 > Because of this, the rollout in
-> **[Security Rollout Plan: Path 1 → Path 2](PATH2_SECURITY_ROLLOUT)** proceeds in
+> **[Security Rollout Plan: Path 1 → Path 2](path2_security_rollout)** proceeds in
 > stages — flash encryption first, then NVS encryption, then Secure Boot, then
 > release mode — verifying each before starting the next.
 
@@ -296,7 +296,7 @@ idf.py -p /dev/cu.usbserial-0001 efuse-summary
 > `efuse-burn`, `efuse-summary` and `secure-generate-flash-encryption-key`.
 
 On a virgin chip, enabling encryption requires the eFuse to be burned first.
-Follow **[Security Rollout Plan: Path 1 → Path 2](PATH2_SECURITY_ROLLOUT)** rather
+Follow **[Security Rollout Plan: Path 1 → Path 2](path2_security_rollout)** rather
 than improvising — it walks through the key generation, the eFuse burn, and the
 staged verification in the order ESP-IDF expects.
 

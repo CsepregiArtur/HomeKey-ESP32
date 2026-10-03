@@ -183,7 +183,7 @@ explicit one-time export.
 See [Security](security) for the full threat model. Additional notes for households:
 
 - Physical access to a node is still a total compromise of that node (flash is not
-  encrypted by design; see [Security](security#physical-access-is-a-total-compromise)).
+  encrypted by design; see [Security](/HomeKey-ESP32/security/#physical-access)).
 - Node authentication across MQTT uses a shared household command key derived from the
   recovery secret; a full household CA/leaf-certificate scheme is future work (the
   current `cert_fingerprint` is a SHA-256 over `node_id || public_key`).

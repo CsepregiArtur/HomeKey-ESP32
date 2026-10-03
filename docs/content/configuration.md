@@ -25,7 +25,7 @@ Welcome to the control center of your HomeKey-ESP32! This guide will walk you th
 > one-time programmable. It **erases the device's Wi-Fi credentials, HomeKit pairing and
 > HomeKey enrolment**, and changes the partition layout, so a serial flash and full
 > re-provisioning are required. Read
-> **[Security Rollout Plan: Path 1 → Path 2](PATH2_SECURITY_ROLLOUT)** before enabling
+> **[Security Rollout Plan: Path 1 → Path 2](path2_security_rollout)** before enabling
 > anything.
 
 ## 1. Accessing the Web Interface
@@ -166,7 +166,7 @@ Configure GPIO pin allocations for the PN532 reader and HomeSpan status controls
     > [!WARNING]
     > **The defaults are chip-specific** — GPIO18/19/23/5 on a classic ESP32, but
     > GPIO4/5/6/7 on an ESP32-C3, where GPIO18/19/23 **do not exist**. See
-    > [Setup → PN532 Module Wiring](setup#21-pn532-module-wiring).
+    > [Setup → PN532 Module Wiring](/HomeKey-ESP32/setup/#21-pn532-module-wiring).
 *   **Fast NFC Polling:** Enables reduced delay between poll cycles for quicker tag detection.
 
 #### 5.2.3. HomeSpan Settings
@@ -220,11 +220,11 @@ firmware module.
 | **Health** | Aggregated health snapshot (network, reader, MQTT, storage) | — |
 | **Security** | Read-only security posture: which hardening is on, and what is still open. **No numeric score.** | [Security](security) |
 | **Audit** | Bounded, 256-record log of security-relevant events | — |
-| **Backup** | Export an encrypted, signed household backup | [Household](household#field-classification) |
+| **Backup** | Export an encrypted, signed household backup | [Household](/HomeKey-ESP32/household/#field-classification) |
 | **Recovery** | Restore onto a replacement node from a backup | [Household](household) |
 | **Provision** | Generate single-use, expiring join codes to enrol a new node | [Household](household) |
 | **Guest tags** | Enrol ordinary NFC cards (NTAG213/215/216) as guest credentials | [Guest NFC Tags](guest-tags) |
-| **Update** | Upload a firmware image over the LAN, and see the running version, partition and slot size | [Updates](updates#1-from-the-web-ui) |
+| **Update** | Upload a firmware image over the LAN, and see the running version, partition and slot size | [Updates](/HomeKey-ESP32/updates/#1-from-the-web-ui) |
 
 > [!NOTE]
 > Two of these replace functionality that upstream exposes differently:

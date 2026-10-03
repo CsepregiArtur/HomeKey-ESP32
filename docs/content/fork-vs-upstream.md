@@ -121,7 +121,7 @@ See [Household & Node Architecture](household).
 - Key derivation: `BLAKE2b("HK-HOUSEHOLD-BACKUP-v1", recovery_secret || salt)`.
 - No raw NVS dumps. The reader private key and endpoint persistent keys are
   **excluded by design** — see the classification table in
-  [Household & Node Architecture](household#field-classification).
+  [Household & Node Architecture](/HomeKey-ESP32/household/#field-classification).
 - Unknown/future format versions are **rejected** (fail closed).
 
 ## 4. MQTT: additive household namespace
@@ -164,7 +164,7 @@ The pin and offset differences are **not** configuration — they are per-chip f
 and getting them wrong produces a device that never boots rather than an error.
 `scripts/ota_update.py` handles the offset automatically, and the reader pins come
 from the Arduino core's per-chip variant. See
-[Setup → Compile Targets](setup#7-compile-targets).
+[Setup → Compile Targets](/HomeKey-ESP32/setup/#7-compile-targets).
 
 ## 6. Security model — the other big difference
 
@@ -172,7 +172,7 @@ from the Arduino core's per-chip variant. See
 > **This fork *implements* flash encryption, Secure Boot V1 and NVS encryption.
 > Upstream deliberately does not.** They are **disabled by default** in this fork
 > so the board stays reversible; turning them on is a deferred, one-way rollout
-> described in [Security Rollout Plan: Path 1 → Path 2](PATH2_SECURITY_ROLLOUT).
+> described in [Security Rollout Plan: Path 1 → Path 2](path2_security_rollout).
 > Once enabled it is irreversible and destroys data on existing devices.
 
 | Protection | Upstream | This fork |
@@ -202,7 +202,7 @@ When Path 2 is executed, be aware that:
 - Every future image must be signed with the same key. Generate it once and keep it
   safe off-machine, or the device can never be updated again.
 
-See [Security](security#flash-encryption-secure-boot-and-nvs-encryption) and
+See [Security](/HomeKey-ESP32/security/#flash-encryption-secure-boot-and-nvs-encryption) and
 [Updates](updates).
 
 ## 7. What is unchanged from upstream
@@ -229,12 +229,12 @@ To be explicit, this fork does **not** touch:
 
 > Enabling the security features is a **separate, deferred step**. Do not generate a
 > signing key or burn eFuses as part of a normal migration — follow
-> **[Security Rollout Plan: Path 1 → Path 2](PATH2_SECURITY_ROLLOUT)** when you are
+> **[Security Rollout Plan: Path 1 → Path 2](path2_security_rollout)** when you are
 > ready for that.
 
 ## Related pages
 
-- [Security Rollout Plan: Path 1 → Path 2](PATH2_SECURITY_ROLLOUT)
+- [Security Rollout Plan: Path 1 → Path 2](path2_security_rollout)
 - [Household & Node Architecture](household)
 - [MQTT Household API](mqtt_household_api)
 - [MQTT API Contract Matrix](mqtt_api_contract_matrix)

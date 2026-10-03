@@ -36,7 +36,7 @@ You are currently viewing the documentation for the **bleeding edge** (`main` br
 > The security features are **implemented but disabled by default** so the board stays
 > fully reversible. Turning them on is a deferred, one-way step: it burns eFuses, erases
 > existing device data and requires a serial re-flash plus full re-provisioning. Read
-> **[Security Rollout Plan: Path 1 → Path 2](PATH2_SECURITY_ROLLOUT)** before enabling
+> **[Security Rollout Plan: Path 1 → Path 2](path2_security_rollout)** before enabling
 > anything, and see **[Fork vs Upstream](fork-vs-upstream)** for the full comparison.
 {{< /callout >}}
 

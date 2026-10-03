@@ -17,7 +17,7 @@ If you never changed the setup AP password from the shipped value, it is `HomeKe
 The update endpoints require **HTTPS** and Web UI authentication. If the Update page
 refuses immediately, check that you opened the device over `https://`, and that you
 are logged in. A plain-HTTP upload is rejected on purpose: an image is the most
-valuable thing a caller can send. See [Updates](updates#1-from-the-web-ui).
+valuable thing a caller can send. See [Updates](/HomeKey-ESP32/updates/#1-from-the-web-ui).
 
 If the upload starts and then fails, the image probably does not fit — the page shows
 the slot size, and the C3 build has only ~30 KB of headroom. Use a smaller image, or
@@ -31,7 +31,7 @@ verify*; if it does not confirm itself (see `setup()` in `main/main.cpp`), the
 bootloader abandons it for the previous slot on the next reset. Check the boot log's
 `Running partition` line to see which slot is live. A device that boots a good image
 but resets later - in `loop()`, for example - is also rolled back. See
-[Updates → Safety: rollback](updates#safety-rollback).
+[Updates → Safety: rollback](/HomeKey-ESP32/updates/#safety-rollback).
 
 ## Requests are rejected with 401 even though the password is correct
 

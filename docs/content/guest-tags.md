@@ -12,7 +12,7 @@ who do not have a HomeKey credential on an Apple device.
 > Guest tags can be managed and monitored from Home Assistant — teach, revoke and cancel
 > a card write, see the card list and set a default validity window. Managing them needs
 > the integration's **direct (TLS) transport**. See
-> [Home Assistant Integration → Guest tags](home-assistant#61-guest-tags).
+> [Home Assistant Integration → Guest tags](/HomeKey-ESP32/home-assistant/#61-guest-tags).
 
 > [!IMPORTANT]
 > **A guest tag is not a HomeKey credential, and it cannot be made into one.**
@@ -240,7 +240,7 @@ card) still works, which is the limitation below.
 Note also that the guest feature stores its tokens in the same NVS partition as the rest
 of the configuration, which is **plaintext at rest** on this firmware (flash encryption
 is a deferred, one-way rollout — see
-[Security Rollout Plan: Path 1 → Path 2](PATH2_SECURITY_ROLLOUT)).
+[Security Rollout Plan: Path 1 → Path 2](path2_security_rollout)).
 
 ## Limits
 

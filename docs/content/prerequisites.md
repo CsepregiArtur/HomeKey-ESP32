@@ -84,7 +84,7 @@ Generally, any board should be fine. However, some may have non-genuine modules 
     *   **Interface:** SPI protocol.
     *   **Recommendation:** Ensure you have a PN532 module that supports SPI communication (for red Elechouse boards/clones, DIP switches must be set to `0` and `1`).
     *   Avoid long jumper wires between the module and ESP32 to maintain signal integrity.
-    *   **Wiring differs per chip** — GPIO18/19/23/5 on a classic ESP32, GPIO4/5/6/7 on an ESP32-C3. See [Setup → PN532 Module Wiring](setup#21-pn532-module-wiring).
+    *   **Wiring differs per chip** — GPIO18/19/23/5 on a classic ESP32, GPIO4/5/6/7 on an ESP32-C3. See [Setup → PN532 Module Wiring](/HomeKey-ESP32/setup/#21-pn532-module-wiring).
 
 ##### Choosing Your PN532: A Mini Buyer's Guide
 

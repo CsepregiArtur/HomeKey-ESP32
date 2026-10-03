@@ -260,7 +260,7 @@ Only after Stage 1 is verified.
      stage costs a full re-provisioning regardless.
    - The `nvs` partition itself **cannot** be flash-encrypted; NVS has its own
      encryption layer. Adding `encrypted` to `nvs` breaks it.
-   - See [Updating firmware](updates#the-layout-and-why-nvs-did-not-shrink) for how
+   - See [Updating firmware](/HomeKey-ESP32/updates/#the-layout-and-why-nvs-did-not-shrink) for how
      the sizes in the current table were arrived at.
 
 3. Re-flash. The device wipes NVS and re-initialises it with the new key.
@@ -355,7 +355,7 @@ them being repeated:
 
 ## Related documents
 
-- [`security.md`](./security.md) — security feature overview
-- [`fork-vs-upstream.md`](./fork-vs-upstream.md) — fork vs. upstream differences
-- [`updates.md`](./updates.md) — serial update procedure and breaking changes
-- [`SINGLE_SLOT_LAYOUT.md`](./single_slot_layout/) — the layout this plan targets
+- [Security](security) — security feature overview
+- [Fork vs Upstream](fork-vs-upstream) — fork vs. upstream differences
+- [Updating firmware](updates) — serial and over-the-air update procedure, and breaking changes
+- [Single-slot layout](single_slot_layout) — the alternative layout this plan can target

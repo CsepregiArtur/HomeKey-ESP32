@@ -35,7 +35,7 @@ Download from **this fork's** releases page:
 Under the "Assets" section you'll find:
 
 * **`*.firmware.factory.bin`**: Used to flash a **new device for the first time**. It contains the bootloader, application and LittleFS filesystem merged into one, ready to be flashed at address `0x0`.
-* **`*.firmware.bin`**: The application firmware only. Written at the application partition offset — this is what you feed to the [Web UI Update page](updates#1-from-the-web-ui) or to `esptool` for a single-partition update.
+* **`*.firmware.bin`**: The application firmware only. Written at the application partition offset — this is what you feed to the [Web UI Update page](/HomeKey-ESP32/updates/#1-from-the-web-ui) or to `esptool` for a single-partition update.
 * **`littlefs.bin`**: The web interface files, written to the filesystem partition.
 
 > [!CAUTION]
