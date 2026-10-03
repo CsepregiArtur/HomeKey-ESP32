@@ -64,6 +64,11 @@ DEFAULT_BAUD = 460800
 # default at the other end of the cable is plain 115200.
 FALLBACK_BAUD = 115200
 
+# Targets this project is set up to build. Anything else needs its RISC-V toolchain
+# installed and a toolchain-clang/cmake combination this tree has not been tested with;
+# see the note in the compile-targets section of docs/content/updates.md.
+SUPPORTED_TARGETS = ("esp32",)
+
 SECRET_KEYS = ("password", "passwd", "secret", "token", "psk")
 
 
@@ -660,7 +665,101 @@ def find_esptool() -> list[str] | None:
     return None
 
 
-def serial_flash(port: str, layout: Path, *, with_fs: bool) -> bool:
+@dataclass
+class ChipInfo:
+    """What the attached device actually is, as reported by esptool."""
+
+    chip: str  # canonical esptool name, e.g. "esp32" or "esp32c3"
+    description: str
+    features: str = ""
+    mac: str = ""
+    flash_size: str = ""
+
+    def describe(self) -> str:
+        bits = [self.description or self.chip]
+        if self.flash_size:
+            bits.append(f"{self.flash_size} flash")
+        if self.mac:
+            bits.append(self.mac)
+        return "  ".join(bits)
+
+
+def detect_chip(esptool: list[str], port: str) -> ChipInfo | None:
+    """Ask esptool what is on the other end of the cable.
+
+    This is what makes the cable path work on any board: the chip name decides the
+    `--chip` argument, and the flash size decides the `write_flash` header. Neither
+    can be guessed from the host build, because a project can ship more than one
+    target's image (this one builds for esp32 and esp32c3 from the same tree).
+
+    `--no-stub` is deliberately not passed: the ROM bootloader reports the chip
+    before any stub is uploaded, so a low baud is enough and a device that is
+    already running a sketch still answers after a reset.
+    """
+    proc = subprocess.run(
+        esptool
+        + [
+            "--port",
+            port,
+            "--baud",
+            "115200",
+            "--before",
+            "default_reset",
+            "--after",
+            "hard_reset",
+            "chip_id",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    output = ((proc.stdout or "") + (proc.stderr or "")).replace("\r", "")
+    if proc.returncode != 0 or "Detecting chip type" in output and "Chip is" not in output:
+        return None
+
+    description = ""
+    m = re.search(r"Chip is (.+)", output)
+    if m:
+        description = m.group(1).strip()
+
+    # "Detecting chip type... ESP32-C3" is the canonical short name esptool wants.
+    chip = ""
+    m = re.search(r"Detecting chip type\.\.\.\s*(\S+)", output)
+    if m:
+        chip = m.group(1).strip().lower().replace("-", "")
+    if not chip:
+        # Older esptool only prints the full description.
+        if description:
+            chip = (
+                description.split()[0].lower().replace("-", "").split("(")[0].strip()
+            )
+    if not chip:
+        return None
+
+    features = ""
+    m = re.search(r"Features:\s*(.+)", output)
+    if m:
+        features = m.group(1).strip()
+
+    flash_size = ""
+    m = re.search(r"Embedded Flash\s+(\d+\s*MB)", features)
+    if m:
+        flash_size = m.group(1).replace(" ", "")
+    else:
+        m = re.search(r"Flash size:\s*(\d+\s*MB)", output)
+        if m:
+            flash_size = m.group(1).replace(" ", "")
+
+    mac = ""
+    m = re.search(r"MAC:\s*([0-9a-f:]{17})", output, re.I)
+    if m:
+        mac = m.group(1)
+
+    return ChipInfo(
+        chip=chip, description=description, features=features, mac=mac, flash_size=flash_size
+    )
+
+
+def serial_flash(port: str, layout: Path, *, with_fs: bool, chip: str | None = None) -> bool:
     esptool = find_esptool()
     if esptool is None:
         die("esptool not found. Install it, or run this from a shell with "
@@ -669,6 +768,39 @@ def serial_flash(port: str, layout: Path, *, with_fs: bool) -> bool:
     for required in (APP_BIN, BOOTLOADER_BIN, PARTITION_BIN):
         if not required.exists():
             die(f"{required} is missing - build the firmware first (idf.py build)")
+
+    detected = detect_chip(esptool, port)
+    if detected is None:
+        die(
+            f"could not read the chip on {port}. Is the device in the bootloader "
+            f"(hold BOOT), the right port chosen, and not held open by a serial monitor? "
+            f"Pass --chip to skip detection."
+        )
+
+    if chip and chip != detected.chip:
+        say(f"Note: --chip says {chip} but the device is {detected.chip}; using the device's own.")
+
+    say(f"\nChip: {detected.describe()}")
+    if detected.features:
+        say(f"      {detected.features}")
+
+    # The image must match the chip. Building for the wrong target produces an
+    # image the ROM refuses to boot, and the failure is a silent reset loop, so it
+    # is worth one comparison here instead of a puzzled half hour later.
+    project_version = None
+    desc = BUILD_DIR / "project_description.json"
+    if desc.exists():
+        try:
+            project_version = json.loads(desc.read_text()).get("target")
+        except (ValueError, OSError):
+            project_version = None
+    if project_version and project_version != detected.chip:
+        die(
+            f"the build in build/ targets '{project_version}' but the device is "
+            f"'{detected.chip}'. Rebuild for this chip:\n"
+            f"    idf.py set-target {detected.chip} && idf.py build\n"
+            f"(or run ./scripts/ota_update.py --target {detected.chip})"
+        )
 
     table = parse_partition_csv(layout)
     if "app0" not in table:
@@ -685,6 +817,10 @@ def serial_flash(port: str, layout: Path, *, with_fs: bool) -> bool:
             die(f"{SPIFFS_BIN} is missing - build with the filesystem first")
         writes.append((table["spiffs"][0], SPIFFS_BIN))
 
+    # "keep" leaves detection to esptool; pinning it when the size is known stops a
+    # mismatched board from being written with a header describing the wrong flash.
+    flash_size = detected.flash_size or "keep"
+
     say(f"\nWriting to {port} using {layout.name}:")
     for offset, path in writes:
         say(f"  0x{offset:06X}  {path.relative_to(REPO_ROOT)}  ({human(path.stat().st_size)})")
@@ -692,7 +828,7 @@ def serial_flash(port: str, layout: Path, *, with_fs: bool) -> bool:
     for baud in (DEFAULT_BAUD, FALLBACK_BAUD):
         cmd = esptool + [
             "--chip",
-            "esp32",
+            detected.chip,
             "--port",
             port,
             "--baud",
@@ -705,7 +841,7 @@ def serial_flash(port: str, layout: Path, *, with_fs: bool) -> bool:
             "--flash_mode",
             "dio",
             "--flash_size",
-            "4MB",
+            flash_size,
         ]
         for offset, path in writes:
             cmd += [hex(offset), str(path)]
@@ -719,6 +855,81 @@ def serial_flash(port: str, layout: Path, *, with_fs: bool) -> bool:
             say(f"  {baud} baud failed, retrying at {FALLBACK_BAUD} baud")
 
     return False
+
+
+def flash_over_cable(args: argparse.Namespace) -> int:
+    """Detect the board, make sure the build matches it, then write it."""
+    ports = [args.port] if args.port else serial_ports()
+    if not ports:
+        say("No serial port found. Connect the device with a USB cable, or pass --port.")
+        return 2
+
+    if len(ports) == 1:
+        port = ports[0]
+    else:
+        say("\nSerial ports:")
+        for i, p in enumerate(ports, start=1):
+            say(f"  {i}) {p}")
+        index = choose("Which port?", ports, allow_all=False)
+        assert index is not None
+        port = ports[index]
+
+    esptool = find_esptool()
+    if esptool is None:
+        die("esptool not found. Run this from a shell with ~/esp/esp-idf/export.sh sourced.")
+
+    detected = detect_chip(esptool, port)
+    if detected is None:
+        die(f"nothing answered on {port}. Check the cable, the port, and that no serial "
+            f"monitor is holding it open.")
+
+    say(f"\nDevice on {port}: {detected.describe()}")
+
+    # The build has to match the board. Rather than asking the user to notice, switch
+    # the target here: `idf.py set-target` is a build-directory operation, so it never
+    # touches the device, and the image it produces is the one this board needs.
+    target = BUILD_DIR / "project_description.json"
+    built_for = None
+    if target.exists():
+        try:
+            built_for = json.loads(target.read_text()).get("target")
+        except (ValueError, OSError):
+            built_for = None
+
+    if built_for and built_for != detected.chip:
+        say(f"The build in build/ targets '{built_for}' but this device is '{detected.chip}'.")
+        if args.no_build:
+            die("pass --port to flash anyway once the build matches, or drop --no-build")
+        if detected.chip not in SUPPORTED_TARGETS:
+            die(
+                f"firmware for '{detected.chip}' cannot be built from this tree as it is "
+                f"configured. Supported targets: {', '.join(SUPPORTED_TARGETS)}.\n"
+                f"  To add one, install its toolchain and export it before running idf.py:\n"
+                f"      python \"$IDF_PATH/tools/idf_tools.py\" install riscv32-esp-elf\n"
+                f"      idf.py set-target {detected.chip} && idf.py build\n"
+                f"  then re-run this script. (This board reports itself correctly; it is "
+                f"the host build that does not match, so nothing was written.)"
+            )
+        if not args.yes and not ask(f"Rebuild for {detected.chip} now?", default=True):
+            say("Nothing to do.")
+            return 0
+        if subprocess.run(["idf.py", "set-target", detected.chip]).returncode != 0:
+            die(f"`idf.py set-target {detected.chip}` failed")
+        if subprocess.run(["idf.py", "build"]).returncode != 0:
+            die("`idf.py build` failed")
+        say("")
+
+    if not args.yes:
+        extra = " and filesystem" if args.with_fs else ""
+        if not ask(f"Flash {port}? This writes bootloader, partition table, application{extra}.",
+                   default=True):
+            say("Nothing to do.")
+            return 0
+
+    ok = serial_flash(port, REPO_ROOT / args.layout, with_fs=args.with_fs)
+    if ok:
+        offer_ui_bundle(APP_BIN, parse_partition_csv(REPO_ROOT / args.layout)["app0"][0])
+    return 0 if ok else 1
 
 
 # ---------------------------------------------------------------------------
@@ -836,33 +1047,6 @@ def wait_for_reboot(device: Device, attempts: int = 30) -> None:
     say("  it has not answered yet; it may still be booting")
 
 
-def serial_flow(args: argparse.Namespace) -> int:
-    ports = [args.port] if args.port else serial_ports()
-    if not ports:
-        say("No serial port found. Connect the device with a USB cable, or pass --port.")
-        return 2
-
-    if len(ports) == 1:
-        port = ports[0]
-        say(f"\nDevice on {port}")
-    else:
-        say("\nSerial ports:")
-        for i, p in enumerate(ports, start=1):
-            say(f"  {i}) {p}")
-        index = choose("Which port?", ports, allow_all=False)
-        assert index is not None
-        port = ports[index]
-
-    if not args.yes:
-        if not ask(f"\nFlash {port}? This writes bootloader, partition table, application"
-                   f"{' and filesystem' if args.with_fs else ''}.", default=True):
-            say("Nothing to do.")
-            return 0
-
-    ok = serial_flash(port, REPO_ROOT / args.layout, with_fs=args.with_fs)
-    return 0 if ok else 1
-
-
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Update HomeKey-ESP32 firmware over the cable or the network.",
@@ -871,6 +1055,19 @@ def main() -> int:
     )
     parser.add_argument("--port", help="serial port to flash (implies the cable flow)")
     parser.add_argument("--image", help=f"application image to upload (default {APP_BIN.name})")
+    parser.add_argument(
+        "--chip",
+        help="chip to assume when flashing over the cable; by default the device is asked",
+    )
+    parser.add_argument(
+        "--target",
+        help="rebuild (set-target + build) for this chip before flashing, e.g. esp32c3",
+    )
+    parser.add_argument(
+        "--no-build",
+        action="store_true",
+        help="never run idf.py; fail instead when the build does not match the device",
+    )
     parser.add_argument(
         "--layout",
         default="with_ota.csv",
@@ -934,18 +1131,34 @@ def main() -> int:
             say(f"  {device.describe()}")
         return 0
 
+    # Rebuilding for a specific chip is a build-directory operation, so it happens
+    # before anything is chosen or flashed.
+    if args.target and not args.no_build:
+        if args.target not in SUPPORTED_TARGETS:
+            die(
+                f"'{args.target}' is not a target this tree builds. Supported: "
+                f"{', '.join(SUPPORTED_TARGETS)}. See the compile-targets note in "
+                f"docs/content/updates.md before adding one."
+            )
+        say(f"Rebuilding for {args.target} ...")
+        if subprocess.run(["idf.py", "set-target", args.target]).returncode != 0:
+            die(f"`idf.py set-target {args.target}` failed")
+        if subprocess.run(["idf.py", "build"]).returncode != 0:
+            die("`idf.py build` failed")
+        say("")
+
     # Decide the flow. An explicitly attached cable wins when the script is not
     # told otherwise: it is the only path that can write a partition table, and
     # it is the right default when someone is standing at the device.
-    if args.port:
-        return serial_flow(args)
+    if args.port or args.chip:
+        return flash_over_cable(args)
 
     attached = serial_ports()
     if attached and not args.yes and sys.stdin.isatty():
         say(f"A device appears to be attached on {attached[0]}.")
         if ask("Flash over the cable instead of updating over the network?", default=True):
             args.port = attached[0]
-            return serial_flow(args)
+            return flash_over_cable(args)
 
     if args.prepare_for_ui:
         # Explicit request: hand over a ready-to-upload file and stop. The web UI

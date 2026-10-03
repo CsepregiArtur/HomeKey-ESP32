@@ -2871,8 +2871,18 @@ esp_err_t WebServerManager::handleOtaInfo(httpd_req_t *req) {
   const esp_partition_t *running = esp_ota_get_running_partition();
   const esp_partition_t *target = esp_ota_get_next_update_partition(nullptr);
 
+  // The chip matters to a client: it decides which image may be installed, and firmware
+  // built for one target will not boot on another. Report it instead of letting the
+  // uploader assume the board it was last pointed at.
+  esp_chip_info_t chip{};
+  esp_chip_info(&chip);
+
   JsonBuilder info = JsonBuilder::object();
   info.addString("version", esp_app_get_description()->version);
+  info.addString("project", esp_app_get_description()->project_name);
+  info.addString("target", CONFIG_IDF_TARGET);
+  info.addNumber("chip_cores", chip.cores);
+  info.addNumber("chip_revision", chip.revision);
   info.addString("partition", running == nullptr ? "unknown" : running->label);
   info.addString("slot", target == nullptr ? "" : target->label);
   info.addNumber("slot_size", target == nullptr ? 0 : target->size);

@@ -151,6 +151,34 @@ not a terminal. When that happens discovery falls back to probing a short list o
 addresses in the same /24, and only hosts running this device's update endpoint
 answer at all. If neither finds anything, pass `--port` and use the cable.
 
+## Compile targets
+
+The script detects the chip on the other end of the cable and refuses to write an
+image built for a different one, because that produces a reset loop rather than an
+error message. **Only `esp32` (the original, Xtensa) is buildable from this tree as
+it is configured.**
+
+An **ESP32-C3** is detected correctly - the script reports
+`ESP32-C3 (QFN32) (revision v0.4) 4MB flash` - but then stops with an explanation,
+because the host build does not match:
+
+* The RISC-V toolchain is not part of a default ESP-IDF install:
+  `python "$IDF_PATH/tools/idf_tools.py" install riscv32-esp-elf`.
+* Even installed, the compile fails in this environment. `tools/cmake/toolchain-esp32c3.cmake`
+  sets `_CMAKE_TOOLCHAIN_PREFIX riscv32-esp-elf-` and IDF's `toolchain.cmake` then
+  assigns the bare name (`set(CMAKE_C_COMPILER riscv32-esp-elf-gcc)`). CMake 4.4
+  (Homebrew) resolves that to Apple's `clang` and the compile dies with
+  `clang: error: unknown argument: '--traditional-format'`. Forcing `CC`/`CXX` to
+  full paths does not override it, because the toolchain file sets them itself.
+
+So a C3 build needs a host-side fix first (a CMake that resolves the RISC-V prefix,
+or an `-DCMAKE_C_COMPILER=<absolute path>` passed into the configure step). The
+board's own flash is not the constraint: its 4 MB matches `with_ota.csv` exactly.
+
+To add a target once that is sorted out, add it to `SUPPORTED_TARGETS` in
+`scripts/ota_update.py`, which currently gates `--target` and the automatic rebuild.
+
+
 ## 3. From a build
 
 ```bash

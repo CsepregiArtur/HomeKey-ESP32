@@ -3,6 +3,9 @@
 
 	type Info = {
 		version: string;
+		project: string;
+		target: string;
+		chip_revision: number;
 		partition: string;
 		slot: string;
 		slot_size: number;
@@ -106,6 +109,13 @@
 			<div class="card-body gap-1">
 				<div class="flex justify-between py-1">
 					<span class="font-semibold">Firmware version</span><code>{info.version}</code>
+				</div>
+				<div class="flex justify-between py-1">
+					<span class="font-semibold">Chip</span>
+					<span>
+						<code>{info.target}</code>
+						<span class="opacity-70"> (revision {info.chip_revision})</span>
+					</span>
 				</div>
 				<div class="flex justify-between py-1">
 					<span class="font-semibold">Running from</span>
