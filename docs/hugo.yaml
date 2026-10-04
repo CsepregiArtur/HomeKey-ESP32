@@ -46,10 +46,12 @@ menu:
 
 params:
   version:
-    latest: "v0.10.0"
+    latest: "v0.12.0"
   versions:
     - name: main
       url: /
+    - name: v0.12.0
+      url: https://csepregiartur.github.io/HomeKey-ESP32/v0.12.0/
     - name: v0.10.0
       url: https://csepregiartur.github.io/HomeKey-ESP32/v0.10.0/
     # Older releases are only published by the upstream project.
