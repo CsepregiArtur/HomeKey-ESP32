@@ -22,6 +22,19 @@ execute_process(
     ERROR_QUIET
 )
 
+# `git describe --tags` yields the tag only when HEAD is exactly on it; one commit
+# later it yields "v0.12.0-1-gabc1234", which a prefix test cannot tell apart. Ask git
+# directly, so the release branch below cannot mistake a build *after* a tag for the
+# tag itself. Empty output (and a non-zero exit, which ERROR_QUIET swallows) means
+# HEAD is not on a tag.
+execute_process(
+    COMMAND git describe --tags --exact-match
+    WORKING_DIRECTORY "${CMAKE_CURRENT_LIST_DIR}"
+    OUTPUT_VARIABLE GIT_RELEASE_TAG
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET
+)
+
 execute_process(
     # --ignore-submodules: several components under components/ are third-party
     # submodules (pn532_cxx, msgpack-c, HomeSpan) pinned at a SHA in someone else's
@@ -43,14 +56,14 @@ if(GIT_EXACT_TAG MATCHES "^dev" AND GIT_COMMIT_HASH)
     # running a development build is visibly different from one on a stable tag such as
     # v0.10.0. The OTA page and HomeKit both surface this string.
     set(PROJECT_VER "${HK_APP_VERSION}-dev+${GIT_COMMIT_HASH}")
-elseif(GIT_EXACT_TAG MATCHES "^v[0-9]")
-    # A build from a release tag reports exactly that tag. Without this branch the
+elseif(GIT_RELEASE_TAG MATCHES "^v[0-9]")
+    # HEAD is exactly on a release tag, so report that tag. Without this branch the
     # version falls through to IDF's default, which is `git describe --dirty`, and
     # that counts submodule drift this project cannot commit - so a released image
     # would announce itself as "v0.12.0-dirty". A local edit to a file this
     # repository owns still appends -dirty, because that is a genuine deviation
     # from what the tag contains.
-    set(PROJECT_VER "${GIT_EXACT_TAG}")
+    set(PROJECT_VER "${GIT_RELEASE_TAG}")
     if(GIT_DIRTY)
         string(APPEND PROJECT_VER "-dirty")
     endif()
