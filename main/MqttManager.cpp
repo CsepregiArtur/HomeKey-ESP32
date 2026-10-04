@@ -660,7 +660,7 @@ void MqttManager::publishHassDiscovery() {
     device.addItem("identifiers", JsonGuard(identifiers.release()));
     
     device.addString("name", device_name.c_str());
-    device.addString("manufacturer", "rednblkx");
+    device.addString("manufacturer", "CsepregiArtur");
     device.addString("model", "HomeKey-ESP32");
     device.addString("sw_version", esp_app_get_description()->version);
     device.addString("configuration_url", fmt::format("http://{}.local", macStr).c_str());

@@ -219,7 +219,7 @@ shared broker LWT (see §12).
 All discovery payloads share a `device` descriptor:
 ```json
 {"identifiers":["<deviceID>","HK-XXXXXXXX"],
- "name":"<device_name>","manufacturer":"rednblkx","model":"HomeKey-ESP32",
+ "name":"<device_name>","manufacturer":"CsepregiArtur","model":"HomeKey-ESP32",
  "sw_version":"<firmware>","configuration_url":"http://HK-XXXXXXXX.local",
  "serial_number":"HK-XXXXXXXX"}
 ```

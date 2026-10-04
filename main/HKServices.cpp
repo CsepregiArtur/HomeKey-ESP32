@@ -40,7 +40,7 @@ Service::NFCAccess::NFCAccess() : SpanService{ "266","NFCAccess",true } {
  * @brief Configure the NFC accessory information accessory and its characteristics.
  *
  * Initializes accessory information characteristics for an NFC HomeKit accessory:
- * sets identify, manufacturer ("rednblkx"), model ("HomeKey-ESP32"), name (from config.deviceName),
+ * sets identify, manufacturer ("CsepregiArtur"), model ("HomeKey-ESP32"), name (from config.deviceName),
  * firmware revision (trimmed app version), and serial number (derived from the device BT MAC as "HK-<MAC>");
  * selects a HardwareFinish TLV from hk_color_vals using config.hk_key_color (defaults to index 0 on out-of-range)
  * and applies it to the HardwareFinish characteristic.
@@ -53,7 +53,7 @@ HomeKitLock::NFCAIS::NFCAIS(const espConfig::misc_config_t& config) {
     ESP_LOGI(HomeKitLock::TAG, "Configuring NFCAccessoryInformation");
     opt.push_back(&_CUSTOM_HardwareFinish);
     new Characteristic::Identify();
-    new Characteristic::Manufacturer("rednblkx");
+    new Characteristic::Manufacturer("CsepregiArtur");
     new Characteristic::Model("HomeKey-ESP32");
     new Characteristic::Name(config.deviceName.c_str());
     std::string app_desc = esp_app_get_description()->version;

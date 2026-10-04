@@ -3,6 +3,20 @@
 Notable changes per release. User-facing detail lives in the docs:
 [Security](docs/content/security.md) and [Updates / breaking changes](docs/content/updates.md).
 
+## 0.13.0 - 2026-10-04
+
+Maintenance release: the temporary PN532 diagnostics that flooded the serial log are removed,
+and the HomeKit/MQTT manufacturer string now identifies this fork.
+
+### Changed
+
+* **Removed the temporary PN532 diagnostics.** The `isRdy: status …` probe (in `pn532_hal`) and
+  the `Preamble missing …` byte dump (in `pn532_cxx`) are gone. Both fired on normal PN532
+  behaviour — the status byte toggling every poll, and the chip's silent reply to the HomeKey
+  ECP broadcast — and dominated the serial log at WARN/ERROR. Their findings are recorded in the
+  code comments where the diagnostics used to be.
+* **Manufacturer string.** The value reported over HomeKit and MQTT is now `CsepregiArtur`.
+
 ## 0.12.0 - 2026-10-03
 
 Firmware updates over the network come back, and the two features that were paying for the
