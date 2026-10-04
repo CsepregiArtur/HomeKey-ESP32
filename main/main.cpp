@@ -6,6 +6,7 @@
 #include <esp_event.h>
 #include <esp_timer.h>
 #include <esp_netif_sntp.h>
+#include <esp_wifi.h>
 #include <ctime>
 #include "dns_server.h"
 #include "HomeKitLock.hpp"
@@ -223,12 +224,48 @@ void reportClockSync() {
 
 } // namespace
 
+// Defined further down, beside setup(). Declared here because the setup access point path
+// calls it again after it restarts the driver, and that path is inside the callback below.
+void applyWifiTxPowerCap();
+
 std::function<void(int)> lambda = [](int status) {
   if (status == 1) {
+    // Say which network was joined and which address came back. Logged at WARN rather than
+    // INFO on purpose: the global log level is WARN, so an INFO line would be missing from
+    // the log a person actually has in front of them, and "did it join, and on what
+    // address?" is the first question asked of a device that has no display of its own.
+    ESP_LOGW("Main", "Wi-Fi connected: SSID \"%s\"  IP %s  gateway %s  mask %s  RSSI %d dBm  BSSID %s",
+             WiFi.SSID().c_str(), WiFi.localIP().toString().c_str(),
+             WiFi.gatewayIP().toString().c_str(), WiFi.subnetMask().toString().c_str(),
+             static_cast<int>(WiFi.RSSI()), WiFi.BSSIDstr().c_str());
+    // The certificate is issued at boot, which is before any address exists, so it cannot
+    // name the address the device is reached on. Now it can, and it is re-issued if the
+    // stored one does not cover this address: a browser matches the URL against the
+    // certificate's subjectAltName, so a certificate that cannot name its own address is
+    // refused for it even by a client that has been told to trust it. Done here, before the
+    // server starts, so the server comes up with the certificate that will actually be used.
+    {
+      bool certificateReplaced = false;
+      deviceCert::ensureSelfSignedCertificate(configManager, &certificateReplaced,
+                                             WiFi.localIP().toString().c_str());
+      if (certificateReplaced) {
+        ESP_LOGW("Main", "Issued a TLS certificate naming %s; it replaces the previous one, "
+                         "so a client that pinned that fingerprint must be updated",
+                 WiFi.localIP().toString().c_str());
+      }
+    }
     char identifier[18];
     sprintf(identifier, "%.2s%.2s%.2s%.2s%.2s%.2s", HAPClient::accessory.ID, HAPClient::accessory.ID + 3, HAPClient::accessory.ID + 6, HAPClient::accessory.ID + 9, HAPClient::accessory.ID + 12, HAPClient::accessory.ID + 15);
     mqttManager->begin(std::string(identifier));
     webServerManager.begin(); 
+    // Logged after the server starts, and with the scheme it actually chose: in station mode
+    // the server can be HTTPS, and then port 80 only redirects to it. Saying "http://"
+    // unconditionally would send a person to a URL that answers with a redirect, and hiding
+    // the port would be wrong too if the configured one is not the default.
+    ESP_LOGW("Main", "Web UI on this network: %s://%s:%u",
+             webServerManager.isTlsActive() ? "https" : "http",
+             WiFi.localIP().toString().c_str(),
+             static_cast<unsigned>(webServerManager.getServerPort()));
     // The web server only starts once the station interface is up, so this is the first
     // moment the API has a real port worth advertising.
     discoveryAdvertiser.onNetworkUp();
@@ -240,7 +277,10 @@ std::function<void(int)> lambda = [](int status) {
     webServerManager.end();
     // No station interface and no TLS in AP mode, so the API is not advertised there.
     discoveryAdvertiser.stop();
-    WiFi.mode(WIFI_AP_STA);
+    // AP-only, not AP+STA: in AP+STA the access point follows the station's channel, and
+    // there is no station link to preserve on this path. The web UI upgrades the mode to
+    // AP+STA by itself once credentials are saved over the AP. The mode itself is set
+    // inside bringUpAp() below, which also restarts the driver.
     uint8_t mac[6];
     esp_read_mac(mac, ESP_MAC_BT);
     const std::string macStr = fmt::format("HK_{:02X}{:02X}{:02X}{:02X}", mac[2], mac[3], mac[4], mac[5]);
@@ -251,9 +291,62 @@ std::function<void(int)> lambda = [](int status) {
     // ("connection timeout") on a range of older clients. CCMP is universally
     // supported; WPA3-only hardening belongs on the station side, not on a
     // short-lived provisioning AP.
-    WiFi.softAP(macStr.c_str(), misc.accessPointPassword.c_str(), 11, false, 2, false, WIFI_AUTH_WPA2_PSK, WIFI_CIPHER_TYPE_CCMP); 
+    // Bring the access point up, then read back what the driver actually holds.
+    //
+    // Arduino's WiFi wrapper is what performs the low-level driver init, so the raw IDF
+    // calls cannot be used to bring the interface up: after WiFi.mode(WIFI_OFF) the
+    // driver is de-initialised and esp_wifi_set_mode() fails outright. Equally, the
+    // wrapper's own return value only reflects the configuration call, so it reports
+    // success even when nothing is on the air. So: bring it up through the wrapper and
+    // verify through the driver, logging both.
+    // The transmit cap this board needs is explained once, at applyWifiTxPowerCap(). It is
+    // re-applied here as well because this path restarts the driver.
+    auto bringUpAp = [&]() -> bool {
+      WiFi.mode(WIFI_OFF);
+      vTaskDelay(pdMS_TO_TICKS(100));
+      const bool modeOk = WiFi.mode(WIFI_AP);   // this is what initialises the driver
+      const bool apOk = WiFi.softAP(macStr.c_str(), misc.accessPointPassword.c_str(), 11,
+                                    false, 2, false, WIFI_AUTH_WPA2_PSK,
+                                    WIFI_CIPHER_TYPE_CCMP);
+      applyWifiTxPowerCap();
+      wifi_config_t back = {};
+      const esp_err_t e_get = esp_wifi_get_config(WIFI_IF_AP, &back);
+      wifi_mode_t driverMode = WIFI_MODE_NULL;
+      esp_wifi_get_mode(&driverMode);
+      // The numeric code is logged, not esp_err_to_name(): this build sets
+      // CONFIG_ESP_ERR_TO_NAME_LOOKUP=n to save flash, so esp_err_to_name() returns
+      // "UNKNOWN ERROR" for every code and the string carries no information at all.
+      // 0 is ESP_OK, which is what a successful read-back returns - and the SSID/channel/
+      // auth printed below can only come from the driver, so a populated read-back with a
+      // zero code is the confirmation this line exists to provide.
+      ESP_LOGW("Main", "AP bring-up: mode()=%d softAP()=%d readback=%d (0=OK) -> driver mode=%d ssid=\"%s\" ch=%u auth=%d heap=%u",
+               modeOk, apOk, static_cast<int>(e_get), static_cast<int>(driverMode),
+               back.ap.ssid, static_cast<unsigned>(back.ap.channel),
+               static_cast<int>(back.ap.authmode),
+               static_cast<unsigned>(esp_get_free_heap_size()));
+      return apOk;
+    };
+    const bool apOk = bringUpAp(); 
     start_captive_portal();
     webServerManager.begin();
+    // Report the AP that is really on the air. The SSID is derived from the chip MAC, so
+    // it differs per device, and this is the name to look for in the Wi-Fi list. HomeSpan
+    // does not start a competing AP here: the app registers setApFunction(), and
+    // HomeSpan's start-AP path returns as soon as that function is present, leaving the
+    // access point entirely to this code.
+    ESP_LOGW("Main", "Setup AP %s: SSID \"%s\" password \"%s\" - open http://192.168.4.1",
+             apOk ? "up" : "FAILED TO START",
+             WiFi.softAPSSID().c_str(), misc.accessPointPassword.c_str());
+    ESP_LOGW("Main", "Setup AP radio state: wifi_mode=%d ap_ip=%s ap_mac=%s",
+             static_cast<int>(WiFi.getMode()), WiFi.softAPIP().toString().c_str(),
+             WiFi.softAPmacAddress().c_str());
+    // Two on-device self-tests were tried here while diagnosing an invisible AP: having
+    // the station interface scan for our own SSID, and having it associate to our own
+    // AP. Both were removed because neither is conclusive - the radio cannot receive its
+    // own beacon, and a standard ESP32 station does not reliably associate to its own
+    // softAP - and the association attempt held the driver in AP+STA for seconds on every
+    // boot. Verify the AP from a separate client instead, and use tools/wifi_ap_test to
+    // tell a board fault from a firmware fault.
     // The setup AP exists so that a device without Wi-Fi credentials can still be
     // configured, but it has no reason to stay on the air forever. Cycling it while
     // nobody is connected shortens the window in which it can be attacked, and it
@@ -261,11 +354,33 @@ std::function<void(int)> lambda = [](int status) {
     // resets the counter.
 #if AP_IDLE_CYCLE_MIN > 0
     uint32_t idleSeconds = 0;
+    wifi_mode_t watchedMode = WIFI_AP;
+    uint8_t watchedStations = 0;
 #endif
     while(true){
 #if AP_IDLE_CYCLE_MIN > 0
       vTaskDelay(pdMS_TO_TICKS(1000));
-      if(WiFi.softAPgetStationNum() > 0){
+      // Two facts are worth reporting from this loop, because a client's Wi-Fi list cannot
+      // show either of them and both look identical to "the AP is not there":
+      //   1. something switching the interface out of AP mode, which would silently take
+      //      the provisioning AP off the air (HomeSpan's station logic is the only
+      //      candidate in this firmware);
+      //   2. a client actually associating, which proves the AP is on the air and settles
+      //      the question entirely.
+      // Both are logged on transition only, so an idle AP stays quiet.
+      const wifi_mode_t nowMode = WiFi.getMode();
+      if(nowMode != watchedMode){
+        ESP_LOGW("Main", "Setup AP mode changed: %d -> %d (2 = AP)",
+                 static_cast<int>(watchedMode), static_cast<int>(nowMode));
+        watchedMode = nowMode;
+      }
+      const uint8_t stations = WiFi.softAPgetStationNum();
+      if(stations != watchedStations){
+        ESP_LOGW("Main", "Setup AP client %s - %u connected",
+                 stations > watchedStations ? "joined" : "left", static_cast<unsigned>(stations));
+        watchedStations = stations;
+      }
+      if(stations > 0){
         idleSeconds = 0;
       } else if(++idleSeconds >= (uint32_t)(AP_IDLE_CYCLE_MIN * 60)){
         idleSeconds = 0;
@@ -273,6 +388,9 @@ std::function<void(int)> lambda = [](int status) {
         WiFi.softAPdisconnect(true);
         vTaskDelay(pdMS_TO_TICKS(1000));
         WiFi.softAP(macStr.c_str(), configManager.getConfig<espConfig::misc_config_t>().accessPointPassword.c_str(), 11, false, 2, false, WIFI_AUTH_WPA2_PSK, WIFI_CIPHER_TYPE_CCMP);
+        // Re-asserted because this path recreates the interface. Without it a cycled AP
+        // would come back at the default 20 dBm and be invisible again.
+        applyWifiTxPowerCap();
         dhcp_set_captiveportal_url();
       }
 #else
@@ -369,6 +487,68 @@ static void setupAuditHooks() {
  *       initialization routines (calls to `begin()` where applicable). It also logs the resolved NFC
  *       GPIO pin configuration based on persisted settings.
  */
+// ---------------------------------------------------------------------------
+// Wi-Fi transmit power
+// ---------------------------------------------------------------------------
+
+/// 8 dBm, in the quarter-dBm units the Wi-Fi driver counts in. See applyWifiTxPowerCap().
+constexpr int8_t kWifiTxPowerQuarterDbm = 8 * 4;
+
+/// Cap the Wi-Fi transmit power, and report what the driver actually holds.
+///
+/// Capped for this board, on every interface, not only on the setup access point.
+///
+/// Established on hardware rather than inferred: at the driver's default 20 dBm the setup
+/// access point was invisible to every client tried - a laptop, a phone, and a build using
+/// ESP-IDF's own softAP path with no Arduino layer and none of this project's configuration
+/// - and at 8 dBm the identical access point was visible and joinable with nothing else
+/// changed. The client used for that test was validated first: it reports "failed to join"
+/// for a nearby network given a deliberately wrong password, but "could not find" for this
+/// one, so the absence was real rather than a limitation of the scanner.
+///
+/// Receive is not affected - the board scans the same networks a laptop does, at the same
+/// signal levels - so the limit is in transmitting, not in the configuration. The suspects
+/// are the C3 "Super Mini" LDO (typically a 500 mA part) and its supply, with the PN532
+/// sharing the same 3.3 V rail.
+///
+/// The station interface gets the same cap for the same reason: an association request sent
+/// at 20 dBm never reaches the router, which fills the log with retries that look like a
+/// wrong password or a weak signal rather than like a transmit problem. If the device has to
+/// reach a router at the far end of a building, raising this value is the wrong first move -
+/// fix the supply first, then raise it.
+void applyWifiTxPowerCap() {
+  const esp_err_t err = esp_wifi_set_max_tx_power(kWifiTxPowerQuarterDbm);
+  int8_t readback = 0;
+  esp_wifi_get_max_tx_power(&readback);
+  // The numeric code, not esp_err_to_name(): this build sets CONFIG_ESP_ERR_TO_NAME_LOOKUP=n,
+  // so every code would print as "UNKNOWN ERROR" and the string would carry no information.
+  // 0 is ESP_OK.
+  ESP_LOGW("Main", "Wi-Fi TX power: 8 dBm requested (err=%d, 0=OK), actual %.2f dBm",
+           static_cast<int>(err), static_cast<double>(readback) * 0.25);
+}
+
+/// Applied on every interface start, so the cap cannot be lost by a mode change or by a
+/// reconnection, and so every association attempt happens under it.
+void onWifiInterfaceStart(void *, esp_event_base_t, int32_t event_id, void *event_data) {
+  switch (event_id) {
+    case WIFI_EVENT_STA_START:
+    case WIFI_EVENT_AP_START:
+      applyWifiTxPowerCap();
+      break;
+    case WIFI_EVENT_STA_DISCONNECTED: {
+      // The reason code is what separates "wrong password" (15, four-way handshake timeout)
+      // from "no such network" (201) from "the router refused us" (205), which need
+      // entirely different fixes. Logged at WARN because the global level is WARN.
+      const auto *disconnected = static_cast<wifi_event_sta_disconnected_t *>(event_data);
+      ESP_LOGW("Main", "Wi-Fi station disconnected (reason %d); retrying",
+               static_cast<int>(disconnected->reason));
+      break;
+    }
+    default:
+      break;
+  }
+}
+
 void setup() {
   #ifdef CONFIG_IDF_TARGET_ESP32
   gpio_set_pull_mode(GPIO_NUM_3, GPIO_PULLUP_ONLY); // U0RXD idle-HIGH in case UART-bridge not present
@@ -388,6 +568,9 @@ void setup() {
   if (err != ESP_OK) {
     ESP_LOGE("Main", "Failed to create default event loop: %d", err);
   }
+  // Registered before anything can start Wi-Fi, so no interface comes up without the
+  // transmit cap this board needs. See applyWifiTxPowerCap().
+  esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, onWifiInterfaceStart, nullptr);
   // Why did we just boot? Without this a crash-reboot is indistinguishable in
   // the logs from a hang: the log simply stops and later resumes. The reset
   // reason separates a software panic from a watchdog timeout from a brownout,

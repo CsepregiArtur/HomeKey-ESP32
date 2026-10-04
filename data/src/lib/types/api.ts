@@ -268,69 +268,6 @@ export interface ActionsConfig {
   hkAltActionGpioState: number;
 }
 
-/**
- * Ethernet configuration structure for network connectivity
- * @type {EthConfig}
- */
-export interface EthConfig {
-  /** Array of supported Ethernet chips */
-  supportedChips: Array<{
-    /** Chip name */
-    name: string;
-    /** Whether the chip supports EMAC */
-    emac: boolean;
-    /** PHY type identifier */
-    phy_type: number;
-  }>;
-  /** Array of board-specific Ethernet presets */
-  boardPresets: Array<{
-    /** Preset name */
-    name: string;
-    /** Ethernet chip configuration */
-    ethChip: {
-      /** Chip name */
-      name: string;
-      /** Whether the chip supports EMAC */
-      emac: boolean;
-      /** PHY type identifier */
-      phy_type: number;
-    };
-    /** RMII interface configuration */
-    rmii_conf: {
-      /** PHY address */
-      phy_addr: number;
-      /** MDC pin number */
-      pin_mcd: number;
-      /** MDIO pin number */
-      pin_mdio: number;
-      /** Power pin number */
-      pin_power: number;
-      /** RMII clock pin number */
-      pin_rmii_clock: number;
-    };
-    /** SPI interface configuration */
-    spi_conf: {
-      /** SPI frequency in MHz */
-      spi_freq_mhz: number;
-      /** Chip select pin number */
-      pin_cs: number;
-      /** Interrupt pin number */
-      pin_irq: number;
-      /** Reset pin number */
-      pin_rst: number;
-      /** SPI clock pin number */
-      pin_sck: number;
-      /** SPI MISO pin number */
-      pin_miso: number;
-      /** SPI MOSI pin number */
-      pin_mosi: number;
-    };
-  }>;
-  /** Whether Ethernet is enabled */
-  ethEnabled: boolean;
-  numSpiBuses: number;
-}
-
 export interface NfcGpioPinsPreset {
   presets: {
     name: string;

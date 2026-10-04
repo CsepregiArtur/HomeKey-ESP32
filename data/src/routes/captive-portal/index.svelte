@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { route } from 'sv-router/generated';
 	import { saveCaptivePortalConfig, rebootDevice, scanWiFi } from '$lib/services/api';
-	import type { CaptivePortalConfig, WiFiNetwork, EthConfig, NfcGpioPinsPreset } from '$lib/types/api';
+	import type { CaptivePortalConfig, WiFiNetwork, NfcGpioPinsPreset } from '$lib/types/api';
 	import HardwareConfig from '$lib/components/HardwareConfig.svelte';
     import { diff } from '$lib/utils/objDiff';
 
@@ -47,36 +47,23 @@
 	let acquiredIP = $state("");
 	let saveMessage = $state("");
 
-	// Derived values for NFC/Ethernet presets
+	// Derived values for NFC presets
 	let nfcPresets : NfcGpioPinsPreset = $derived(route.meta.captivePortalData?.nfcPresets ?? { presets: [] });
-	let ethConfig : EthConfig = $derived(route.meta.captivePortalData?.ethConfig ?? { boardPresets: [], supportedChips: [], numSpiBuses: 1, ethEnabled: false });
 
 	function validateSetupCode(code: string): boolean {
 		return /^\d{8}$/.test(code);
 	}
 
 	function validateForm(): string | null {
-		// WiFi is only required if Ethernet is not enabled
-		if (!config.ethernetEnabled) {
-			if (!config.wifiSsid || config.wifiSsid.length === 0) {
-				return 'WiFi SSID is required (or enable Ethernet)';
-			}
-			if (config.wifiSsid.length > 32) {
-				return 'WiFi SSID must be 32 characters or less';
-			}
-			if (config.wifiPassword.length > 64) {
-				return 'WiFi password must be 64 characters or less';
-			}
-		} else {
-			// If WiFi is provided even with Ethernet, validate it
-			if (config.wifiSsid && config.wifiSsid.length > 0) {
-				if (config.wifiSsid.length > 32) {
-					return 'WiFi SSID must be 32 characters or less';
-				}
-				if (config.wifiPassword.length > 64) {
-					return 'WiFi password must be 64 characters or less';
-				}
-			}
+		// Ethernet was removed from the firmware, so the transport is WiFi only.
+		if (!config.wifiSsid || config.wifiSsid.length === 0) {
+			return 'WiFi SSID is required';
+		}
+		if (config.wifiSsid.length > 32) {
+			return 'WiFi SSID must be 32 characters or less';
+		}
+		if (config.wifiPassword.length > 64) {
+			return 'WiFi password must be 64 characters or less';
 		}
 		if (!validateSetupCode(config.setupCode)) {
 			return 'HomeKit Setup Code must be exactly 8 digits';
@@ -98,46 +85,6 @@
 			}
 		}
 	}
-
-	function handleEthPresetChange(preset: number) {
-		config.ethActivePreset = preset;
-		if (preset !== 255 && ethConfig?.boardPresets) {
-			const presetData = ethConfig.boardPresets[preset];
-			if (presetData) {
-				config.ethPhyType = presetData.ethChip.phy_type;
-				if (presetData.spi_conf) {
-					config.ethSpiConfig = [
-						presetData.spi_conf.spi_freq_mhz,
-						presetData.spi_conf.pin_cs,
-						presetData.spi_conf.pin_irq,
-						presetData.spi_conf.pin_rst,
-						presetData.spi_conf.pin_sck,
-						presetData.spi_conf.pin_miso,
-						presetData.spi_conf.pin_mosi,
-					];
-					config.ethRmiiConfig = config.ethRmiiConfig || [0, -1, -1, -1, 0];
-				}
-				if (presetData.rmii_conf) {
-					config.ethRmiiConfig = [
-						presetData.rmii_conf.phy_addr,
-						presetData.rmii_conf.pin_mcd,
-						presetData.rmii_conf.pin_mdio,
-						presetData.rmii_conf.pin_power,
-						presetData.rmii_conf.pin_rmii_clock,
-					];
-					config.ethSpiConfig = config.ethSpiConfig || [20, -1, -1, -1, -1, -1, -1];
-				}
-			}
-		}
-	}
-
-	// Watch ethActivePreset changes and apply preset config
-	$effect(() => {
-		const preset = config.ethActivePreset;
-		if (preset !== undefined) {
-			handleEthPresetChange(preset);
-		}
-	});
 
 	// Watch nfcPinsPreset changes and apply/restore pins
 	$effect(() => {
@@ -228,7 +175,7 @@
 				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
 			</svg>
 			<div>
-				<span class="font-bold">{config.ethernetEnabled ? 'Ethernet' : 'WiFi'} connection successful!</span>
+				<span class="font-bold">WiFi connection successful!</span>
         <div class="font-bold">IP Address: {acquiredIP}</div>
 				{#if saveMessage}
 				<div class="text-sm">{saveMessage}</div>
@@ -484,7 +431,7 @@
 					<div class="space-y-4">
 						<div>
 							<h3 class="text-sm font-semibold">Hardware Configuration</h3>
-							<p class="text-xs text-base-content/60">Configure GPIO pins for NFC reader and optional Ethernet connectivity.</p>
+							<p class="text-xs text-base-content/60">Configure GPIO pins for the NFC reader.</p>
 						</div>
 
 						<HardwareConfig
@@ -494,13 +441,6 @@
 							bind:nfcReaderType={config.nfcReaderType}
 							bind:nfcIrqPin={config.nfcIrqPin}
 							bind:nfcVenPin={config.nfcVenPin}
-							bind:ethernetEnabled={config.ethernetEnabled}
-							bind:ethActivePreset={config.ethActivePreset}
-							bind:ethPhyType={config.ethPhyType}
-							bind:ethSpiBus={config.ethSpiBus}
-							bind:ethRmiiConfig={config.ethRmiiConfig}
-							bind:ethSpiConfig={config.ethSpiConfig}
-							ethConfig={ethConfig}
 							loading={loading}
               bind:nfcFastPollingEnabled={config.nfcFastPollingEnabled}
               bind:overrideStrappingRestriction={config.overrideStrappingRestriction}

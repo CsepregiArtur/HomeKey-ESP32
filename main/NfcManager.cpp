@@ -321,16 +321,16 @@ void NfcManager::pollingTask() {
             }
         }
         if (!m_reader->healthCheck()) {
-					ESP_LOGE(TAG, "NFC reader is unresponsive. Attempting to reconnect...");
-					while (true) {
-						if (initializeReader()) {
-							ESP_LOGI(TAG, "Reader reconnected successfully.");
-							break;
-						}
-						ESP_LOGW(TAG, "Reconnect attempt failed. Retrying in 5 seconds...");
-						vTaskDelay(pdMS_TO_TICKS(5000));
-					}
-					continue;
+            ESP_LOGE(TAG, "NFC reader is unresponsive. Attempting to reconnect...");
+            while (true) {
+                if (initializeReader()) {
+                    ESP_LOGI(TAG, "Reader reconnected successfully.");
+                    break;
+                }
+                ESP_LOGW(TAG, "Reconnect attempt failed. Retrying in 5 seconds...");
+                vTaskDelay(pdMS_TO_TICKS(5000));
+            }
+            continue;
         }
 
         std::vector<uint8_t> uid;

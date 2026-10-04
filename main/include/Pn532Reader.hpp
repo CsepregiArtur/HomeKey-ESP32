@@ -53,12 +53,14 @@ public:
     bool healthCheck() override;
     bool updateECP() override { return true;};
 private:
+    void markDisconnected();
     const std::array<uint8_t, 18> &m_ecpData;
     std::array<uint8_t, 4> m_gpioPins;
     pn532::SpiTransport* m_transport = nullptr;
     pn532::Frontend* m_frontend = nullptr;
 
     bool m_connected = false;
+    uint8_t m_pollTimeoutCount = 0;
     uint8_t m_fwMajor = 0;
     uint8_t m_fwMinor = 0;
 

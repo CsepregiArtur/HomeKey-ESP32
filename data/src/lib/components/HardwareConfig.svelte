@@ -1,6 +1,5 @@
 <script lang="ts">
-	import type { EthConfig, NfcGpioPinsPreset } from '$lib/types/api';
-	import SpiEthernetNote from './SpiEthernetNote.svelte';
+	import type { NfcGpioPinsPreset } from '$lib/types/api';
 	import { route } from 'sv-router/generated';
 
 	interface Props {
@@ -10,13 +9,6 @@
 		nfcReaderType: number;
 		nfcIrqPin: number;
 		nfcVenPin: number;
-		ethernetEnabled: boolean;
-		ethActivePreset: number;
-		ethPhyType: number;
-		ethSpiBus: number;
-		ethRmiiConfig: [number, number, number, number, number];
-		ethSpiConfig: [number, number, number, number, number, number, number];
-		ethConfig: EthConfig | null;
 		nfcConnected?: boolean;
 		loading?: boolean;
 		nfcFastPollingEnabled: boolean;
@@ -30,13 +22,6 @@
 		nfcReaderType = $bindable(),
 		nfcIrqPin = $bindable(),
 		nfcVenPin = $bindable(),
-		ethernetEnabled = $bindable(),
-		ethActivePreset = $bindable(),
-		ethPhyType = $bindable(),
-		ethSpiBus = $bindable(),
-		ethRmiiConfig = $bindable(),
-		ethSpiConfig = $bindable(),
-		ethConfig,
 		nfcFastPollingEnabled = $bindable(false),
     overrideStrappingRestriction = $bindable(),
 		nfcConnected = false,
@@ -56,18 +41,9 @@
 			: ['SS Pin', 'SCK Pin', 'MISO Pin', 'MOSI Pin']
 	);
 
-	let currentEthChip = $derived(() => {
-		if (ethPhyType !== undefined && ethConfig?.supportedChips) {
-			return ethConfig.supportedChips[ethPhyType];
-		}
-		return null;
-	});
 </script>
 
 <div class="space-y-4">
-  {#if ethernetEnabled && !currentEthChip()?.emac}
-    <SpiEthernetNote spiNumBuses={ethConfig?.numSpiBuses ?? 1} selectedBus={ethSpiBus} />
-  {/if}
 	<div class="py-2 px-3 bg-base-100 rounded-lg">
 		<div class="flex items-center justify-between mb-2">
 			<p class="text-sm font-medium">GPIO Allocation</p>
@@ -245,238 +221,4 @@
     </div>
 	</div>
 
-	<!-- Ethernet Configuration -->
-	<div class="py-2 px-3 bg-base-100 rounded-lg">
-		<p class="text-sm font-medium mb-2">Ethernet Configuration</p>
-
-		<div class="flex items-center justify-between mb-3">
-			<div>
-				<p class="text-sm font-medium">Enable Ethernet</p>
-				<p class="text-xs text-base-content/60">Use wired Ethernet instead of WiFi</p>
-			</div>
-			<input
-				type="checkbox"
-				bind:checked={ethernetEnabled}
-				class="toggle toggle-primary toggle-sm"
-				disabled={loading}
-			/>
-		</div>
-
-		{#if ethernetEnabled}
-			<div class="form-control">
-				<label class="label" for="ethPreset">
-					<span class="label-text text-xs">Board Preset</span>
-				</label>
-				<select
-					id="ethPreset"
-					bind:value={ethActivePreset}
-					class="select select-sm select-bordered w-full"
-					disabled={loading}
-				>
-					{#if ethConfig?.boardPresets}
-						{#each ethConfig.boardPresets as preset, i}
-							<option value={i}>{preset.name}</option>
-						{/each}
-					{/if}
-					<option value={255}>Custom</option>
-				</select>
-			</div>
-
-			<div class="form-control">
-				<label class="label" for="ethPhyType">
-					<span class="label-text text-xs">PHY Type</span>
-				</label>
-				<select
-					id="ethPhyType"
-					bind:value={ethPhyType}
-					disabled={ethActivePreset !== 255 || loading}
-					class="select select-sm select-bordered w-full"
-				>
-					{#if ethConfig?.supportedChips}
-						{#each ethConfig.supportedChips as chip}
-							<option value={chip.phy_type}>{chip.name}</option>
-						{/each}
-					{/if}
-				</select>
-			</div>
-
-			{#if currentEthChip()?.emac}
-				<div class="py-2 px-3 bg-base-100 rounded-lg">
-					<p class="text-sm font-medium mb-2">RMII Configuration</p>
-					<div class="grid grid-cols-2 md:grid-cols-3 gap-2">
-						<div class="form-control">
-							<label class="label" for="ethPhyAddr">
-								<span class="label-text text-xs">PHY Address</span>
-							</label>
-							<input
-								id="ethPhyAddr"
-								type="number"
-								bind:value={ethRmiiConfig[0]}
-								disabled={ethActivePreset !== 255 || loading}
-								class="input input-sm input-bordered w-full"
-							/>
-						</div>
-						<div class="form-control">
-							<label class="label" for="ethPinMdc">
-								<span class="label-text text-xs">Pin MDC</span>
-							</label>
-							<input
-								id="ethPinMdc"
-								type="number"
-								bind:value={ethRmiiConfig[1]}
-								disabled={ethActivePreset !== 255 || loading}
-								class="input input-sm input-bordered w-full"
-							/>
-						</div>
-						<div class="form-control">
-							<label class="label" for="ethPinMdio">
-								<span class="label-text text-xs">Pin MDIO</span>
-							</label>
-							<input
-								id="ethPinMdio"
-								type="number"
-								bind:value={ethRmiiConfig[2]}
-								disabled={ethActivePreset !== 255 || loading}
-								class="input input-sm input-bordered w-full"
-							/>
-						</div>
-						<div class="form-control">
-							<label class="label" for="ethPinPower">
-								<span class="label-text text-xs">Pin Power</span>
-							</label>
-							<input
-								id="ethPinPower"
-								type="number"
-								bind:value={ethRmiiConfig[3]}
-								disabled={ethActivePreset !== 255 || loading}
-								class="input input-sm input-bordered w-full"
-							/>
-						</div>
-						<div class="form-control">
-							<label class="label" for="ethRmiiClock">
-								<span class="label-text text-xs">RMII Clock</span>
-							</label>
-							<select
-								id="ethRmiiClock"
-								bind:value={ethRmiiConfig[4]}
-								disabled={ethActivePreset !== 255 || loading}
-								class="select select-sm select-bordered w-full"
-							>
-								<option value={0}>GPIO0_IN</option>
-								<option value={1}>GPIO0_OUT</option>
-								<option value={2}>GPIO16_OUT</option>
-								<option value={3}>GPIO17_OUT</option>
-							</select>
-						</div>
-					</div>
-				</div>
-			{:else}
-				<div class="py-2 px-3 bg-base-100 rounded-lg">
-					<p class="text-sm font-medium mb-2">SPI Configuration</p>
-					<div class="grid grid-cols-2 md:grid-cols-4 gap-2">
-						<div class="form-control">
-							<label class="label" for="ethSpiBus">
-								<span class="label-text text-xs">SPI Bus</span>
-							</label>
-							<select
-								id="ethSpiBus"
-								bind:value={ethSpiBus}
-								disabled={ethActivePreset !== 255 || loading || ethConfig?.numSpiBuses === 1}
-								class="select select-sm select-bordered w-full"
-							>
-								<option value={1}>SPI2</option>
-								{#if ethConfig?.numSpiBuses === 2}
-									<option value={2}>SPI3</option>
-								{/if}
-							</select>
-						</div>
-						<div class="form-control">
-							<label class="label" for="ethSpiFreq">
-								<span class="label-text text-xs">Freq (MHz)</span>
-							</label>
-							<input
-								id="ethSpiFreq"
-								type="number"
-								bind:value={ethSpiConfig[0]}
-								disabled={ethActivePreset !== 255 || loading}
-								class="input input-sm input-bordered w-full"
-							/>
-						</div>
-						<div class="form-control">
-							<label class="label" for="ethCsPin">
-								<span class="label-text text-xs">CS Pin</span>
-							</label>
-							<input
-								id="ethCsPin"
-								type="number"
-								bind:value={ethSpiConfig[1]}
-								disabled={ethActivePreset !== 255 || loading}
-								class="input input-sm input-bordered w-full"
-							/>
-						</div>
-						<div class="form-control">
-							<label class="label" for="ethIrqPin">
-								<span class="label-text text-xs">IRQ Pin</span>
-							</label>
-							<input
-								id="ethIrqPin"
-								type="number"
-								bind:value={ethSpiConfig[2]}
-								disabled={ethActivePreset !== 255 || loading}
-								class="input input-sm input-bordered w-full"
-							/>
-						</div>
-						<div class="form-control">
-							<label class="label" for="ethRstPin">
-								<span class="label-text text-xs">RST Pin</span>
-							</label>
-							<input
-								id="ethRstPin"
-								type="number"
-								bind:value={ethSpiConfig[3]}
-								disabled={ethActivePreset !== 255 || loading}
-								class="input input-sm input-bordered w-full"
-							/>
-						</div>
-						<div class="form-control">
-							<label class="label" for="ethSckPin">
-								<span class="label-text text-xs">SCK Pin</span>
-							</label>
-							<input
-								id="ethSckPin"
-								type="number"
-								bind:value={ethSpiConfig[4]}
-								disabled={ethActivePreset !== 255 || loading}
-								class="input input-sm input-bordered w-full"
-							/>
-						</div>
-						<div class="form-control">
-							<label class="label" for="ethMisoPin">
-								<span class="label-text text-xs">MISO Pin</span>
-							</label>
-							<input
-								id="ethMisoPin"
-								type="number"
-								bind:value={ethSpiConfig[5]}
-								disabled={ethActivePreset !== 255 || loading}
-								class="input input-sm input-bordered w-full"
-							/>
-						</div>
-						<div class="form-control">
-							<label class="label" for="ethMosiPin">
-								<span class="label-text text-xs">MOSI Pin</span>
-							</label>
-							<input
-								id="ethMosiPin"
-								type="number"
-								bind:value={ethSpiConfig[6]}
-								disabled={ethActivePreset !== 255 || loading}
-								class="input input-sm input-bordered w-full"
-							/>
-						</div>
-					</div>
-				</div>
-			{/if}
-		{/if}
-	</div>
 </div>

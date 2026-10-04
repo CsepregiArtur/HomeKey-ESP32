@@ -122,6 +122,34 @@ def build_target() -> str | None:
         return None
 
 
+def sdkconfig_target() -> str | None:
+    """The target recorded in the root sdkconfig, if there is one.
+
+    This is a third opinion and it does not always agree with the other two. sdkconfig
+    is written by confgen, which takes the target from the IDF_TARGET environment
+    variable, while project_description.json and flash_args are written by the CMake
+    side from the target argument. A build interrupted part way (SIGINT during ninja)
+    can leave sdkconfig back at Kconfig's default of esp32 while the build directory
+    still targets esp32c3. Resuming then fails with:
+
+        Project sdkconfig '.../sdkconfig' was generated for target 'esp32',
+        but environment variable IDF_TARGET is set to 'esp32c3'.
+
+    so a resume is only safe when this agrees too; otherwise the target has to be set
+    again with `set-target`, which rewrites sdkconfig.
+    """
+    cfg = REPO_ROOT / "sdkconfig"
+    if not cfg.exists():
+        return None
+    try:
+        for line in cfg.read_text().splitlines():
+            if line.startswith("CONFIG_IDF_TARGET="):
+                return line.split("=", 1)[1].strip().strip('"')
+    except OSError:
+        return None
+    return None
+
+
 def check_build_consistency() -> None:
     """Refuse to flash when the build directory describes two different chips.
 
@@ -166,18 +194,23 @@ REQUIRED_IMAGES = (("application", APP_BIN), ("bootloader", BOOTLOADER_BIN),
                    ("partition table", PARTITION_BIN))
 
 
-def require_build_artifacts() -> None:
-    """Fail early and clearly when the tree has not been built (or built fully).
+def missing_build_artifacts() -> list[tuple[str, Path]]:
+    """Images that are absent or empty, as (label, path) pairs.
 
-    An image that exists but is empty is treated as missing: a failed link leaves a
+    An image that exists but is empty counts as missing: a failed link leaves a
     zero-byte `HomeKey-ESP32.elf` behind and `idf.py build` can still exit 0, so a
     plain `exists()` check would pass and the flash would write nothing at that offset.
     """
-    missing = [
+    return [
         (label, path)
         for label, path in REQUIRED_IMAGES
         if not path.exists() or path.stat().st_size == 0
     ]
+
+
+def require_build_artifacts() -> None:
+    """Fail when the tree has not been built, or was built only part way."""
+    missing = missing_build_artifacts()
     if not missing:
         return
     details = "\n".join(f"    {label:<16} {rel(path)}" for label, path in missing)
@@ -404,8 +437,8 @@ class Device:
         return "  ".join(bits)
 
 
-def dns_sd_lines(service: str, duration: float = 3.0) -> list[str]:
-    """Run `dns-sd` for a moment and collect its output.
+def dns_sd_lines(mode: str, *args: str, duration: float = 3.0) -> list[str]:
+    """Run `dns-sd` in one of its modes and collect its output.
 
     macOS ships no python zeroconf and this project has no dependencies, so the
     OS's own mDNS client is used instead of adding one. `dns-sd` never exits on
@@ -413,9 +446,14 @@ def dns_sd_lines(service: str, duration: float = 3.0) -> list[str]:
     whatever was produced rather than blocking forever on a final read that will
     never come. Its output is line-buffered and can arrive late or not at all,
     which is why discovery has a plain gethostbyname fallback below.
+
+    The mode is passed through verbatim: `-B` browses a service *type*, while
+    `-L` resolves one named *instance*. Passing an instance to `-B` looks like a
+    browse of a service type that does not exist and silently returns nothing,
+    so the two must never be confused.
     """
     proc = subprocess.Popen(
-        ["dns-sd", "-B", service],
+        ["dns-sd", mode, *args],
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
@@ -515,7 +553,7 @@ def discover(timeout: float = 4.0) -> list[Device]:
         browse: list[str] = []
     else:
         say(f"Browsing for {MDNS_SERVICE} ...")
-        browse = dns_sd_lines(MDNS_SERVICE, timeout)
+        browse = dns_sd_lines("-B", MDNS_SERVICE, duration=timeout)
 
     instances: dict[str, str] = {}
     for line in browse:
@@ -527,14 +565,21 @@ def discover(timeout: float = 4.0) -> list[Device]:
 
     devices: list[Device] = []
     for instance, _domain in instances.items():
-        lines = dns_sd_lines(f"{instance}.{MDNS_SERVICE}", 3.0)
+        # `-L <instance> <type>` resolves the instance; `-B <type>` would browse
+        # a service type literally named after the instance and find nothing.
+        lines = dns_sd_lines("-L", instance, MDNS_SERVICE, duration=3.0)
         host = port = None
         txt: dict[str, str] = {}
         for line in lines:
             m = re.search(r"can be reached at\s+(\S+?):(\d+)", line)
             if m:
                 host, port = m.group(1).rstrip("."), int(m.group(2))
+            # dns-sd prints TXT as one unquoted `key=value` list when no value
+            # contains a space (`tls=1 cfg=rw fp=... ver=... name=HK id=...`);
+            # only values with spaces come back quoted. Accept both forms.
             pairs = re.findall(r'"([^"]*)"', line)
+            if not pairs:
+                pairs = re.findall(r"(?<![\w=-])([A-Za-z0-9_]+=\S+)", line)
             if pairs:
                 txt.update(parse_txt(pairs))
         if host is None:
@@ -1019,8 +1064,13 @@ def serial_flash(port: str, layout: Path, *, with_fs: bool, chip: str | None = N
     return False
 
 
-def rebuild_for(target: str) -> bool:
-    """Switch the build to `target` and compile it.
+def rebuild_for(target: str, *, full: bool = True) -> bool:
+    """Compile for `target`, optionally switching the build directory first.
+
+    `full=False` resumes an interrupted build in a directory that already targets the
+    right chip. That matters because `set-target` deletes build/ and starts over, so a
+    Ctrl+C at 1560/1662 would otherwise cost a full five-minute rebuild to finish the
+    last hundred files.
 
     esp32c3 needs the assembler shim described in scripts/build_esp32c3.sh, because
     IDF's `riscv32-esp-elf-as` is a Rust dispatcher that fails to resolve its real
@@ -1028,14 +1078,15 @@ def rebuild_for(target: str) -> bool:
     RISC-V flags. Calling `idf.py set-target` directly would fail, so the helper is
     used when it exists.
     """
-    if target != "esp32":
-        helper = REPO_ROOT / "scripts" / f"build_{target}.sh"
-        if helper.exists():
-            for step in ("set-target", "build"):
-                if subprocess.run([str(helper), step]).returncode != 0:
-                    return False
-            return True
-    if subprocess.run(["idf.py", "set-target", target]).returncode != 0:
+    helper = REPO_ROOT / "scripts" / f"build_{target}.sh"
+    steps = ("set-target", "build") if full else ("build",)
+    if helper.exists():
+        for step in steps:
+            if subprocess.run([str(helper), step]).returncode != 0:
+                return False
+        return True
+
+    if full and subprocess.run(["idf.py", "set-target", target]).returncode != 0:
         return False
     return subprocess.run(["idf.py", "build"]).returncode == 0
 
@@ -1079,20 +1130,21 @@ def flash_over_cable(args: argparse.Namespace) -> int:
 
     say(f"\nDevice on {port}: {detected.describe()}")
 
-    # The build has to match the board. Rather than asking the user to notice, switch
-    # the target here: `idf.py set-target` is a build-directory operation, so it never
-    # touches the device, and the image it produces is the one this board needs.
-    target = BUILD_DIR / "project_description.json"
-    built_for = None
-    if target.exists():
-        try:
-            built_for = json.loads(target.read_text()).get("target")
-        except (ValueError, OSError):
-            built_for = None
+    # The build has to match the board, and it has to be finished. Both are fixable
+    # here rather than by asking the user to notice: building is a build-directory
+    # operation, so it never touches the device, and the image it produces is the one
+    # this board needs.
+    built_for = build_target()
+    cfg_for = sdkconfig_target()
+    missing = missing_build_artifacts()
 
-    if built_for and built_for != detected.chip:
-        say(f"The build in build/ targets '{built_for}' but this device is '{detected.chip}'.")
+    target_mismatch = built_for is not None and built_for != detected.chip
+    sdkconfig_mismatch = cfg_for is not None and cfg_for != detected.chip
+
+    if missing or target_mismatch or sdkconfig_mismatch:
         if args.no_build:
+            if missing:
+                require_build_artifacts()  # reports the missing files and exits
             die(
                 f"--no-build was given, so the build was not switched from '{built_for}' "
                 f"to '{detected.chip}'. Nothing was written. Either drop --no-build to "
@@ -1110,12 +1162,41 @@ def flash_over_cable(args: argparse.Namespace) -> int:
                 f"  then re-run this script. (This board reports itself correctly; it is "
                 f"the host build that does not match, so nothing was written.)"
             )
-        if not args.yes and not ask(f"Rebuild for {detected.chip} now?", default=True):
-            say("Nothing to do.")
-            return 0
-        if not rebuild_for(detected.chip):
+
+        # A resume is much cheaper than a switch: `set-target` deletes build/ and starts
+        # over, which would discard a build that is already most of the way done. It is
+        # only unusable when the build directory or sdkconfig belongs to another chip.
+        full = target_mismatch or sdkconfig_mismatch or built_for is None
+        if target_mismatch:
+            say(
+                f"The build in build/ targets '{built_for}' but this device is "
+                f"'{detected.chip}'."
+            )
+        elif sdkconfig_mismatch:
+            say(
+                f"sdkconfig is set to '{cfg_for}' but this device is '{detected.chip}'."
+            )
+
+        if full:
+            say(f"Reconfiguring and building for {detected.chip} ...")
+        else:
+            names = ", ".join(label for label, _ in missing)
+            say(
+                f"The build for {detected.chip} is unfinished ({names} missing); "
+                f"resuming it."
+            )
+
+        # Only a target switch is worth confirming, because only it throws work away.
+        # Resuming an interrupted build destroys nothing, so it just happens.
+        if full and not args.yes:
+            if not ask(f"Rebuild for {detected.chip} now?", default=True):
+                say("Nothing to do.")
+                return 0
+
+        if not rebuild_for(detected.chip, full=full):
             die(f"could not build for {detected.chip}")
         say("")
+        require_build_artifacts()
 
     if not args.yes:
         extra = " and filesystem" if args.with_fs else ""
@@ -1128,7 +1209,11 @@ def flash_over_cable(args: argparse.Namespace) -> int:
         port, REPO_ROOT / args.layout, with_fs=args.with_fs, chip=args.chip
     )
     if ok:
-        offer_ui_bundle(APP_BIN, parse_partition_csv(REPO_ROOT / args.layout)["app0"][0])
+        offer_ui_bundle(
+            APP_BIN,
+            parse_partition_csv(REPO_ROOT / args.layout)["app0"][0],
+            assume_yes=args.yes,
+        )
     return 0 if ok else 1
 
 
@@ -1137,20 +1222,23 @@ def flash_over_cable(args: argparse.Namespace) -> int:
 # ---------------------------------------------------------------------------
 
 
-def offer_ui_bundle(image: Path, app_offset: int) -> None:
+def offer_ui_bundle(image: Path, app_offset: int, *, assume_yes: bool = False) -> None:
     """Ask whether to leave a ready-to-upload file for the web UI's Update page.
 
     The page accepts a raw image at `app_offset`; a file produced for `esptool
     write_flash` carries no offset, and the two are indistinguishable by eye. The
     copies are byte-identical to the build output and are only duplicated here so
     the file to drag into the browser is obvious.
+
+    `assume_yes` (from --yes) takes the interactive default without prompting, so
+    a scripted run never blocks on this question.
     """
     name = f"homekey-ota-{image.stat().st_size}-0x{app_offset:X}.bin"
     say("\nPrepare an image file to install from the device's own web UI?")
     say(f"  The Update page expects a raw {human(image.stat().st_size)} image; it will be")
     say(f"  copied to {name} so it is obvious which file to choose.")
 
-    if not ask("Copy it there now?", default=True):
+    if not assume_yes and not ask("Copy it there now?", default=True):
         say("  Skipped.")
         return
 

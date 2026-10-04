@@ -31,11 +31,20 @@ namespace deviceCert {
  * @param generatedOut optional; set to true only when a new certificate was created on
  *        this call. Callers use it to distinguish "this device has an identity" from
  *        "this device just acquired its first one", which is a one-time event.
+ * @param address optional; the IPv4 address the device is reached on. When given, the
+ *        certificate is issued with that address as a subjectAltName, and a stored
+ *        certificate that does not already cover it is replaced. Without a matching
+ *        subjectAltName a browser reports a name mismatch even when the certificate
+ *        itself has been trusted, so a certificate that cannot name its own address
+ *        cannot produce a warning-free page. Callers that do not know the address yet
+ *        (the boot-time call does not, because a station address only exists once the
+ *        association succeeds) pass nothing and keep whatever is stored.
  * @return the SHA-256 fingerprint of the certificate as colon-separated uppercase hex,
  *         or an empty string if no identity could be established.
  */
 std::string ensureSelfSignedCertificate(ConfigManager &configManager,
-                                       bool *generatedOut = nullptr);
+                                       bool *generatedOut = nullptr,
+                                       const std::string &address = {});
 
 /**
  * @brief SHA-256 fingerprint of a PEM certificate, colon-separated uppercase hex.

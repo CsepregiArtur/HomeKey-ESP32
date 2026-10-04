@@ -58,6 +58,11 @@ Pn532Reader::~Pn532Reader() {
 }
 
 bool Pn532Reader::init() {
+    // Raise this tag to INFO for the life of the process, the same way
+    // ReaderDataManager does for the credential store. The configured global level is
+    // WARN, which would otherwise hide the only line that says whether the reader came
+    // up, leaving no way to tell a working reader from a missing one without the Web UI.
+    esp_log_level_set(TAG, ESP_LOG_INFO);
     ESP_LOGI(TAG, "PN532 SPI wiring in use: SS/CS=%u SCK=%u MISO=%u MOSI=%u",
              m_gpioPins[0], m_gpioPins[1], m_gpioPins[2], m_gpioPins[3]);
 
@@ -74,16 +79,19 @@ bool Pn532Reader::init() {
         m_frontend = new pn532::Frontend(*m_transport);
     }
 
-    if (auto status = m_frontend->begin(); status != pn532::Status::SUCCESS){
+    if (auto status = m_frontend->begin(); status != pn532::Status::SUCCESS) {
         ESP_LOGE(TAG, "Error establishing PN532 connection. (err=%d, %s)",
                  static_cast<int>(status), pn532StatusHint(status));
         ESP_LOGE(TAG, "PN532 SPI wiring in use: SS/CS=%u SCK=%u MISO=%u MOSI=%u",
                  m_gpioPins[0], m_gpioPins[1], m_gpioPins[2], m_gpioPins[3]);
+        stop();
+        return false;
     }
     if (auto versiondata = m_frontend->GetFirmwareVersion()) {
       ESP_LOGI(TAG, "Found chip PN532, Firmware ver. %d.%d",
               (versiondata.value() >> 24) & 0xFF, (versiondata.value() >> 16) & 0xFF);
       m_connected = true;
+      m_pollTimeoutCount = 0;
       m_fwMajor = static_cast<uint8_t>((versiondata.value() >> 24) & 0xFF);
       m_fwMinor = static_cast<uint8_t>((versiondata.value() >> 16) & 0xFF);
     } else {
@@ -145,11 +153,36 @@ bool Pn532Reader::pollForTag(std::vector<uint8_t>& uid,
     if (!m_frontend) return false;
     uint8_t sel_res = 0;
     std::vector<uint8_t> res;
-    (void)m_frontend->InCommunicateThru(m_ecpData, res, 50);
+    // HomeKey discovery broadcasts an ECP frame ahead of the normal poll. Skip it
+    // while no reader identity has been provisioned: m_ecpData is all zeros then,
+    // and an 18-byte zero frame is not a valid command payload.
+    if (m_ecpData[0] == 0x6A) {
+        (void)m_frontend->InCommunicateThru(m_ecpData, res, 50);
+    }
     const pn532::Status status = m_frontend->InListPassiveTarget(
         0x0, uid, atqa, sel_res, timeoutMs);
     sak = sel_res;
-    return status == pn532::Status::SUCCESS;
+
+    if (status == pn532::Status::SUCCESS) {
+        m_pollTimeoutCount = 0;
+        m_connected = true;
+        return true;
+    }
+    // No tag in the field is the normal idle result and proves the link is alive.
+    if (status == pn532::Status::NO_TAGS_FOUND) {
+        m_pollTimeoutCount = 0;
+        return false;
+    }
+    // Require a few consecutive timeouts before declaring the reader gone, so a
+    // single slow RF cycle does not trigger a reconnect in the middle of a poll.
+    if (status == pn532::Status::TIMEOUT && ++m_pollTimeoutCount < 3) {
+        return false;
+    }
+
+    ESP_LOGE(TAG, "Passive poll failed (status %d); marking reader unresponsive",
+             static_cast<int>(status));
+    markDisconnected();
+    return false;
 }
 
 bool Pn532Reader::isTagStillPresent() {
@@ -207,16 +240,19 @@ bool Pn532Reader::transceiveRaw(const std::vector<uint8_t>& send,
 }
 
 bool Pn532Reader::healthCheck() {
+    // Liveness is derived from the passive polls themselves, so the check costs no
+    // extra bus traffic. A failed poll marks the reader disconnected (see
+    // markDisconnected), and the manager reconnects from there.
     if (!m_frontend) {
-        m_connected = false;
+        markDisconnected();
         return false;
     }
-    pn532::Status status = m_frontend->WriteRegister({0x63, 0x3d, 0x0});
-    if (status != pn532::Status::SUCCESS) {
-        m_connected = false;
-        m_fwMajor = 0;
-        m_fwMinor = 0;
-        return false;
-    }
-    return true;
+    return m_connected;
+}
+
+void Pn532Reader::markDisconnected() {
+    m_connected = false;
+    m_pollTimeoutCount = 0;
+    m_fwMajor = 0;
+    m_fwMinor = 0;
 }

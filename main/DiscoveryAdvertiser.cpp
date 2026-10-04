@@ -84,6 +84,15 @@ bool DiscoveryAdvertiser::advertise() {
     return false;
   }
 
+  // Re-read from the stored certificate on every advertise rather than keeping the value
+  // begin() captured: the certificate is re-issued once the device knows the address it is
+  // reached on, and a client that pinned the fingerprint it was told earlier must be given
+  // the current one, not a value that no longer exists.
+  if (m_configManager != nullptr) {
+    m_fingerprint = deviceCert::certificateFingerprint(
+        m_configManager->getHttpsCertsConfig().serverCert);
+  }
+
   // Idempotent - it returns ESP_OK when the stack is already up, which is the normal
   // case because HomeSpan starts mDNS for HAP during homekitLock->begin().
   if (mdns_init() != ESP_OK) {

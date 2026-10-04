@@ -23,6 +23,9 @@ gha-creds-*.json
 docs/public
 .direnv/
 build-*/
+# Out-of-tree probe builds (scripts/build_pn532_probe.sh). Same idea as build-*/
+# above: build output, never source.
+build_probe*/
 # Secure Boot signing keys — NEVER commit private keys.
 keys/
 *.pem

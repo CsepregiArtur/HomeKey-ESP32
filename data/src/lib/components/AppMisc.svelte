@@ -8,7 +8,6 @@
 	} from "$lib/services/api";
 	import {
 		CertificateType,
-		type EthConfig,
 		type MiscConfig,
 		type NfcGpioPinsPreset,
 	} from "$lib/types/api";
@@ -19,7 +18,6 @@
 
 	interface Props {
                 misc: MiscConfig | null | undefined;
-                eth: EthConfig | null | undefined;
                 nfcPresets: NfcGpioPinsPreset | null | undefined;
                 nfcConnected?: boolean;
                 error?: string | null;
@@ -27,7 +25,6 @@
 
 	let { 
 		misc = $bindable(), 
-		eth, 
 		nfcPresets, 
 		nfcConnected = $bindable(false), 
 		error = $bindable() 
@@ -37,8 +34,6 @@
 
 	// svelte-ignore state_referenced_locally
         let miscConfig = $state<MiscConfig>($state.snapshot(misc ?? ({} as MiscConfig)));
-        // svelte-ignore state_referenced_locally
-        let ethConfig = $state<EthConfig>($state.snapshot(eth ?? ({} as EthConfig)));
         // svelte-ignore state_referenced_locally
         let nfcPresetsList = $state<NfcGpioPinsPreset>($state.snapshot(nfcPresets ?? ({} as NfcGpioPinsPreset)));
 	const colorOptions = [
@@ -108,76 +103,12 @@
     }
   };
 
-  const handleEthPresetChange = (preset: number) => {
-    miscConfig.ethActivePreset = preset;
-    if (preset !== 255 && ethConfig!.boardPresets) {
-      const presetData = ethConfig!.boardPresets[preset];
-      if (presetData) {
-        miscConfig.ethPhyType = presetData.ethChip.phy_type;
-        if (presetData.spi_conf) {
-          miscConfig.ethSpiConfig = [
-            presetData.spi_conf.spi_freq_mhz,
-            presetData.spi_conf.pin_cs,
-            presetData.spi_conf.pin_irq,
-            presetData.spi_conf.pin_rst,
-            presetData.spi_conf.pin_sck,
-            presetData.spi_conf.pin_miso,
-            presetData.spi_conf.pin_mosi,
-          ];
-          miscConfig.ethRmiiConfig = misc?.ethRmiiConfig 
-            ? [
-              misc.ethRmiiConfig[0],
-              misc.ethRmiiConfig[1],
-              misc.ethRmiiConfig[2],
-              misc.ethRmiiConfig[3],
-              misc.ethRmiiConfig[4]
-              ]
-            : [0, -1, -1, -1, 0];
-        }
-        if (presetData.rmii_conf) {
-          miscConfig.ethRmiiConfig = [
-            presetData.rmii_conf.phy_addr,
-            presetData.rmii_conf.pin_mcd,
-            presetData.rmii_conf.pin_mdio,
-            presetData.rmii_conf.pin_power,
-            presetData.rmii_conf.pin_rmii_clock,
-          ];
-          miscConfig.ethSpiConfig = misc?.ethSpiConfig 
-            ? [
-              misc.ethSpiConfig[0],
-              misc.ethSpiConfig[1],
-              misc.ethSpiConfig[2],
-              misc.ethSpiConfig[3],
-              misc.ethSpiConfig[4],
-              misc.ethSpiConfig[5],
-              misc.ethSpiConfig[6]
-              ]
-            : [20, -1, -1, -1, -1, -1, -1];
-        }
-      }
-    }
-  };
   const resetForm = () => {
       if (misc) {
           // Use snapshot to avoid sharing references
           miscConfig = $state.snapshot(misc);
       }
   };
-
-	// Watch ethActivePreset from the original config and apply preset on load
-	$effect(() => {
-		if (misc?.ethActivePreset !== 255 && misc) {
-			handleEthPresetChange(misc.ethActivePreset);
-		}
-	});
-
-	// Watch user-driven ethActivePreset changes and apply preset
-	$effect(() => {
-		const preset = miscConfig?.ethActivePreset;
-		if (preset !== undefined) {
-			handleEthPresetChange(preset);
-		}
-	});
 
 	// Watch nfcPinsPreset and apply/restore pins
 	$effect(() => {
@@ -451,7 +382,7 @@
 						<div class="space-y-4">
 							<div>
 								<h3 class="text-sm font-semibold">Hardware Configuration</h3>
-								<p class="text-xs text-base-content/60">Configure GPIO pins for NFC reader and optional Ethernet connectivity.</p>
+								<p class="text-xs text-base-content/60">Configure GPIO pins for the NFC reader.</p>
 							</div>
 
 							<HardwareConfig
@@ -461,13 +392,6 @@
 								bind:nfcReaderType={miscConfig.nfcReaderType}
 								bind:nfcIrqPin={miscConfig.nfcIrqPin}
 								bind:nfcVenPin={miscConfig.nfcVenPin}
-								bind:ethernetEnabled={miscConfig.ethernetEnabled}
-								bind:ethActivePreset={miscConfig.ethActivePreset}
-								bind:ethPhyType={miscConfig.ethPhyType}
-								bind:ethSpiBus={miscConfig.ethSpiBus}
-								bind:ethRmiiConfig={miscConfig.ethRmiiConfig}
-								bind:ethSpiConfig={miscConfig.ethSpiConfig}
-								ethConfig={ethConfig}
 								nfcConnected={nfcConnected}
 								bind:nfcFastPollingEnabled={miscConfig.nfcFastPollingEnabled}
                 bind:overrideStrappingRestriction={miscConfig.overrideStrappingRestriction}

@@ -1,5 +1,5 @@
 import type { Hooks } from 'sv-router';
-import type { CaptivePortalConfig, EthConfig, NfcGpioPinsPreset } from '$lib/types/api';
+import type { CaptivePortalConfig, NfcGpioPinsPreset } from '$lib/types/api';
 import { setLoadingState } from '$lib/stores/system.svelte';
 
 declare module 'sv-router' {
@@ -7,7 +7,6 @@ declare module 'sv-router' {
     captivePortalData?: {
       config: CaptivePortalConfig | null;
       nfcPresets: NfcGpioPinsPreset | null;
-      ethConfig: EthConfig | null;
       error: string | null;
     };
   }
@@ -19,10 +18,9 @@ export default {
       setLoadingState(true);
 
       // Fetch all config data in parallel
-      const [configRes, nfcRes, ethRes] = await Promise.all([
+      const [configRes, nfcRes] = await Promise.all([
         fetch('/captive_portal_config').then(r => r.json()),
         fetch('/nfc_get_presets').then(r => r.json()),
-        fetch('/eth_get_config').then(r => r.json()),
       ]);
 
       if (!configRes.success) throw new Error(configRes.error);
@@ -50,7 +48,6 @@ export default {
           nfcFastPollingEnabled: data.nfcFastPollingEnabled ?? false
         },
         nfcPresets: nfcRes.success ? nfcRes.data : null,
-        ethConfig: ethRes.success ? ethRes.data : null,
         error: null,
       };
     } catch (error) {
@@ -76,7 +73,6 @@ export default {
           nfcFastPollingEnabled: false
         },
         nfcPresets: null,
-        ethConfig: null,
         error: error instanceof Error ? error.message : 'Unknown error',
       };
     } finally {
