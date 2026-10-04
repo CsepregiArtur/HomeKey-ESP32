@@ -7,7 +7,7 @@ title: "HomeKitLock"
 The `HomeKitLock` class serves as the central bridge between the application's core logic and the Apple HomeKit ecosystem, facilitated by the HomeSpan library. It is designed as a singleton and is responsible for initializing the HomeKit accessory, defining its services and characteristics, managing the Wi-Fi network connection, and synchronizing the lock's state with HomeKit.
 
 > [!NOTE]
-> **This fork is Wi-Fi only.** Upstream's `HomeKitLock` also initialized an Ethernet connection (`initializeETH()`, with a fallback to Wi-Fi) and delegated to an `EthernetDriver` module. Both were removed here — see [EthernetDriver](ethernetdriver) and [Fork vs Upstream](../fork-vs-upstream).
+> **This fork is Wi-Fi only.** Upstream's `HomeKitLock` also initialized an Ethernet connection (`initializeETH()`, with a fallback to Wi-Fi) and delegated to an `EthernetDriver` module. Both were removed here — see [EthernetDriver](/HomeKey-ESP32/api/ethernetdriver/) and [Fork vs Upstream](/HomeKey-ESP32/fork-vs-upstream/).
 
 A critical function of this class is managing the lifecycle of HomeKey issuers. It listens for changes in paired HomeKit controllers and automatically updates the `NvsCredentialStore` with the necessary cryptographic keys (LTPK), ensuring that newly paired devices can use HomeKey.
 
@@ -99,7 +99,7 @@ void updateBatteryStatus(uint8_t batteryLevel, bool isLow);
 > This method **does not exist in this fork.** Upstream used it to hand off Ethernet
 > bring-up to the `EthernetDriver` module; with both Ethernet and that module removed,
 > there is nothing to initialize. HomeSpan manages the Wi-Fi connection directly.
-> See [EthernetDriver](ethernetdriver).
+> See [EthernetDriver](/HomeKey-ESP32/api/ethernetdriver/).
 
 ## 4. Core Logic & Callbacks
 

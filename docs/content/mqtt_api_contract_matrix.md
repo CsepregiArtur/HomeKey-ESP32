@@ -8,7 +8,7 @@ weight: 14
 > [!NOTE]
 > **Fork-only document.** This contract describes the household MQTT API added by
 > this fork. Upstream's MQTT surface is the smaller legacy topic set; nothing here
-> exists upstream. See [Fork vs Upstream](fork-vs-upstream).
+> exists upstream. See [Fork vs Upstream](/HomeKey-ESP32/fork-vs-upstream/).
 
 Formal interface contract between **HomeKey-ESP32 v0.12.0** and
 **HomeKey Household — Home Assistant V2**. This document is the result of a
@@ -311,7 +311,7 @@ write NVS.
   `mqtt_tls`, `https`, `web_auth` (each OK/WARNING/DISABLED).
 - The `ota_signature` and `homespan_ota` checks are not part of this set. The device
   updates over the LAN through its own HTTPS endpoint with certificate pinning and
-  rollback (see [Updating firmware](updates)), not through HomeSpan's OTA service or a
+  rollback (see [Updating firmware](/HomeKey-ESP32/updates/)), not through HomeSpan's OTA service or a
   GitHub updater, so neither of those checks has anything to report. Update state is not
   a *security* check.
 - No numeric security score is exposed (not on MQTT, not in the Web UI).
@@ -327,7 +327,7 @@ write NVS.
   exposed on this surface: an image is installed either over the cable or through the
   device's own authenticated HTTPS endpoint (`POST /api/ota/firmware`), which requires both
   a Web UI credential and TLS. Nothing on MQTT can cause the device to install firmware.
-  See [Updating firmware](updates).
+  See [Updating firmware](/HomeKey-ESP32/updates/).
 
 ---
 

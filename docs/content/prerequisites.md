@@ -57,7 +57,7 @@ The required hardware can be obtained either by sourcing all the parts yourself 
 > [!IMPORTANT]
 > **This fork supports a narrower hardware set than upstream.** Ethernet is removed,
 > and so are the PN7160/PN7161 and ST25R3916 readers. Choose your board and NFC
-> module accordingly — see [Fork vs Upstream](fork-vs-upstream).
+> module accordingly — see [Fork vs Upstream](/HomeKey-ESP32/fork-vs-upstream/).
 
 ##### ESP32 Buyer's Guide
 

@@ -32,7 +32,7 @@ The event system defines several event bases, each with its own set of event IDs
 > [!NOTE]
 > The upstream `ETH_APP_EVENT` base (Ethernet lifecycle: `ETH_STARTED`, `ETH_GOT_IP`,
 > `ETH_LOST_IP`, `ETH_DISCONNECTED`, `ETH_STOPPED`) **does not exist in this fork** — the
-> Ethernet driver was removed. See [Fork vs Upstream](../fork-vs-upstream).
+> Ethernet driver was removed. See [Fork vs Upstream](/HomeKey-ESP32/fork-vs-upstream/).
 
 > [!NOTE]
 > The `HK_EVENT` base carries a single event ID (`HK_INTERNAL_EVENT`), but the payload is a `HomekitEvent` struct whose `type` field further distinguishes the sub-events: `SETUP_CODE_CHANGED`, `BTR_PROP_CHANGED`, `ACCESSDATA_CHANGED`, and `DEBUG_AUTH_FLOW`. Subscribers should deserialize the payload and switch on this type.

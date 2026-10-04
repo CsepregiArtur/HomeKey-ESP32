@@ -46,7 +46,7 @@ The Web UI rejects requests whose `Host` header does not name the device (this b
 ./scripts/ota_update.py --port /dev/cu.usbserial-XXXX
 ```
 
-See [Updates](updates).
+See [Updates](/HomeKey-ESP32/updates/).
 
 ## HomeKey not working on Apple Watch
 

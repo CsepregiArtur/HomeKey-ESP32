@@ -11,7 +11,7 @@ weight: 5
 > *audit*, *backup*, *recovery*, *provision*, *guest tags* and a reworked *Update*
 > page. It also **removes the Ethernet settings** and the PN7160/PN7161 and
 > ST25R3916 reader options — Wi-Fi and the PN532 only. The default security posture
-> matches upstream (flash encryption off). See [Fork vs Upstream](fork-vs-upstream).
+> matches upstream (flash encryption off). See [Fork vs Upstream](/HomeKey-ESP32/fork-vs-upstream/).
 
 Welcome to the control center of your HomeKey-ESP32! This guide will walk you through all the settings you can tweak to make your device work exactly how you want it to. All these configurations are easily managed through the device's intuitive web interface.
 
@@ -25,7 +25,7 @@ Welcome to the control center of your HomeKey-ESP32! This guide will walk you th
 > one-time programmable. It **erases the device's Wi-Fi credentials, HomeKit pairing and
 > HomeKey enrolment**, and changes the partition layout, so a serial flash and full
 > re-provisioning are required. Read
-> **[Security Rollout Plan: Path 1 → Path 2](path2_security_rollout)** before enabling
+> **[Security Rollout Plan: Path 1 → Path 2](/HomeKey-ESP32/path2_security_rollout/)** before enabling
 > anything.
 
 ## 1. Accessing the Web Interface
@@ -158,7 +158,7 @@ Configure GPIO pin allocations for the PN532 reader and HomeSpan status controls
 > [!IMPORTANT]
 > **Only the PN532 is supported in this fork.** Upstream's `PN7161 (SPI)` and
 > `ST25R3916 (I2C)` options, their IRQ/VEN pins and their presets were removed to free
-> flash for the second OTA slot. See [Fork vs Upstream](fork-vs-upstream).
+> flash for the second OTA slot. See [Fork vs Upstream](/HomeKey-ESP32/fork-vs-upstream/).
 
 *   **Reader Type:** `PN532 (SPI)` — the only supported reader.
 *   **Preset:** Select a predefined hardware board preset (@lollokara, CASmo-NFC, or `Custom`).
@@ -210,20 +210,20 @@ Configure WebUI authentication, HTTPS SSL/TLS encryption, and certificates.
 ## 7. Pages Added by This Fork
 
 These pages do **not** exist upstream. They are the household/security layer described
-in [Household & Node Architecture](household); each one is a read-mostly view over a
+in [Household & Node Architecture](/HomeKey-ESP32/household/); each one is a read-mostly view over a
 firmware module.
 
 | Page | What it shows | Related docs |
 | --- | --- | --- |
-| **Household** | Household id/name/state, the trust anchor, member nodes, and the recovery secret | [Household](household) |
-| **Node** | This device's Ed25519 identity, generation counter and role | [Household](household) |
+| **Household** | Household id/name/state, the trust anchor, member nodes, and the recovery secret | [Household](/HomeKey-ESP32/household/) |
+| **Node** | This device's Ed25519 identity, generation counter and role | [Household](/HomeKey-ESP32/household/) |
 | **Health** | Aggregated health snapshot (network, reader, MQTT, storage) | — |
-| **Security** | Read-only security posture: which hardening is on, and what is still open. **No numeric score.** | [Security](security) |
+| **Security** | Read-only security posture: which hardening is on, and what is still open. **No numeric score.** | [Security](/HomeKey-ESP32/security/) |
 | **Audit** | Bounded, 256-record log of security-relevant events | — |
 | **Backup** | Export an encrypted, signed household backup | [Household](/HomeKey-ESP32/household/#field-classification) |
-| **Recovery** | Restore onto a replacement node from a backup | [Household](household) |
-| **Provision** | Generate single-use, expiring join codes to enrol a new node | [Household](household) |
-| **Guest tags** | Enrol ordinary NFC cards (NTAG213/215/216) as guest credentials | [Guest NFC Tags](guest-tags) |
+| **Recovery** | Restore onto a replacement node from a backup | [Household](/HomeKey-ESP32/household/) |
+| **Provision** | Generate single-use, expiring join codes to enrol a new node | [Household](/HomeKey-ESP32/household/) |
+| **Guest tags** | Enrol ordinary NFC cards (NTAG213/215/216) as guest credentials | [Guest NFC Tags](/HomeKey-ESP32/guest-tags/) |
 | **Update** | Upload a firmware image over the LAN, and see the running version, partition and slot size | [Updates](/HomeKey-ESP32/updates/#1-from-the-web-ui) |
 
 > [!NOTE]

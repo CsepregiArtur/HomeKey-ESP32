@@ -37,7 +37,7 @@ HACS independently:
 
 | Transport | How it works | Covers | Needs a broker |
 | --- | --- | --- | --- |
-| **`mqtt`** | The documented household MQTT API (see [MQTT Household API](mqtt_household_api)), reusing Home Assistant's core MQTT integration | a **whole household** in one entry | yes |
+| **`mqtt`** | The documented household MQTT API (see [MQTT Household API](/HomeKey-ESP32/mqtt_household_api/)), reusing Home Assistant's core MQTT integration | a **whole household** in one entry | yes |
 | **`direct`** | The node's own HTTPS API (`/api/ha/*`), with its certificate pinned to an exact fingerprint | **one node** per entry | **no** |
 
 ```
@@ -173,7 +173,7 @@ instead of spending a second slot** — so a lost card is revoked, not overwritt
 `write_supported`, `last_write_result`, `last_write_message`, `node_has_wall_clock`).
 A card's per-tag secret is in neither the sensor nor diagnostics — the node never
 publishes it, so nothing readable from Home Assistant could clone a card. See
-[Guest NFC Tags](guest-tags).
+[Guest NFC Tags](/HomeKey-ESP32/guest-tags/).
 
 ### 6.2. Knowing who opened the door
 
@@ -238,7 +238,7 @@ The flow is visible in Home Assistant: `sensor.<node>_backup` exposes
 `api_configured` and a `restore` block, and diagnostics adds a `backup_store` summary.
 See [Backup and full restore](https://github.com/CsepregiArtur/homekey-household/blob/main/docs/BACKUP_AND_RESTORE.md)
 for the step-by-step replacement-node procedure and its limits. The firmware side is in
-[Household & Node Architecture](household).
+[Household & Node Architecture](/HomeKey-ESP32/household/).
 
 ## 8. Topics used (MQTT transport)
 
@@ -312,9 +312,9 @@ set, because HomeSpan owns it and HomeKit controllers resolve it.
 
 ## 12. Related pages
 
-- [MQTT Household API](mqtt_household_api) — the MQTT contract this integration implements
-- [MQTT API Contract Matrix](mqtt_api_contract_matrix) — every topic, payload and auth requirement
-- [Household & Node Architecture](household) — households, node identity, backups
-- [Guest NFC Tags](guest-tags) — the credential type the guest entities manage
-- [Security](security) — the device-side trust model
-- [HASS Automations](automations) — automation examples
+- [MQTT Household API](/HomeKey-ESP32/mqtt_household_api/) — the MQTT contract this integration implements
+- [MQTT API Contract Matrix](/HomeKey-ESP32/mqtt_api_contract_matrix/) — every topic, payload and auth requirement
+- [Household & Node Architecture](/HomeKey-ESP32/household/) — households, node identity, backups
+- [Guest NFC Tags](/HomeKey-ESP32/guest-tags/) — the credential type the guest entities manage
+- [Security](/HomeKey-ESP32/security/) — the device-side trust model
+- [HASS Automations](/HomeKey-ESP32/automations/) — automation examples

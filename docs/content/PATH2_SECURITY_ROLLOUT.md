@@ -10,7 +10,7 @@ weight: 18
 > **Decision date:** 2026-09-25
 > **Owner:** @CsepregiArtur
 > **Revised:** 2026-10-03 — the partition layout it refers to is now the dual-slot
-> `with_ota.csv`; see [Updating firmware](updates).
+> `with_ota.csv`; see [Updating firmware](/HomeKey-ESP32/updates/).
 
 This document records the deliberate two-step approach to hardware security on
 this fork, why it is split in two, and exactly what changes when Path 2 is
@@ -56,7 +56,7 @@ sense to make the part that is hard to change permanent.
 > signed images can therefore be delivered **over the LAN** as well as over the
 > cable, and a bad one does not brick the device. Read
 > [Stage 4](#stage-4--release-mode) before starting anything below, and see
-> [Updating firmware](updates).
+> [Updating firmware](/HomeKey-ESP32/updates/).
 
 ---
 
@@ -355,7 +355,7 @@ them being repeated:
 
 ## Related documents
 
-- [Security](security) — security feature overview
-- [Fork vs Upstream](fork-vs-upstream) — fork vs. upstream differences
-- [Updating firmware](updates) — serial and over-the-air update procedure, and breaking changes
-- [Single-slot layout](single_slot_layout) — the alternative layout this plan can target
+- [Security](/HomeKey-ESP32/security/) — security feature overview
+- [Fork vs Upstream](/HomeKey-ESP32/fork-vs-upstream/) — fork vs. upstream differences
+- [Updating firmware](/HomeKey-ESP32/updates/) — serial and over-the-air update procedure, and breaking changes
+- [Single-slot layout](/HomeKey-ESP32/single_slot_layout/) — the alternative layout this plan can target

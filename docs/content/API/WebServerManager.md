@@ -88,7 +88,7 @@ The server exposes the following categories of endpoints. Requests are handled a
 
 > [!NOTE]
 > Upstream's `GET /eth_get_config` **does not exist in this fork** — the Ethernet driver
-> was removed. See [Fork vs Upstream](../fork-vs-upstream).
+> was removed. See [Fork vs Upstream](/HomeKey-ESP32/fork-vs-upstream/).
 
 ### Captive Portal (AP Mode)
 
@@ -124,7 +124,7 @@ once the system is up.
 > **There is no GitHub updater in this fork.** The former upstream `/ota/release` and
 > `/ota/install` routes, the HomeSpan OTA service, and the OTA password are all gone.
 > The device never fetches firmware on its own — an update only happens when an
-> authenticated caller pushes one. See [Updates](../../updates/).
+> authenticated caller pushes one. See [Updates](/HomeKey-ESP32/updates/).
 
 ### Certificate Management
 

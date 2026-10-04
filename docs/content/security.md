@@ -13,7 +13,7 @@ HomeKey-ESP32 controls a door lock, so it is worth being explicit about what it 
 > board stays fully reversible. Turning them on changes the physical-access threat
 > model and makes a serial re-flash mandatory; it is a deferred, staged, one-way
 > rollout described in
-> [Security Rollout Plan: Path 1 → Path 2](path2_security_rollout). See also
+> [Security Rollout Plan: Path 1 → Path 2](/HomeKey-ESP32/path2_security_rollout/). See also
 > [Fork vs Upstream](/HomeKey-ESP32/fork-vs-upstream/#6-security-model--the-other-big-difference).
 
 ## Threat model
@@ -47,7 +47,7 @@ These protections are active without any configuration:
 
 * **Secrets are never sent to the browser.** Configuration reads return `********` for every `*Password`/`*Passwd` field, and the write path refuses to store that placeholder, so a stale form cannot overwrite a real password with the mask.
 
-* **Firmware updates can arrive over the network, and that surface is deliberately narrow.** The device uses a **dual-slot** flash layout (`with_ota.csv`): two application partitions and an `otadata` selector, so a new image is written into the slot the device is *not* running from. Uploading is `POST /api/ota/firmware`, which requires **both** Web UI authentication (`basicAuth()`) and **HTTPS** (`haRequireTls()`) — a plain-HTTP upload is refused. The image is validated with `esp_ota_end()` before it is ever made bootable, and `CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y` means a newly flashed image that fails to confirm itself is abandoned in favour of the previous slot on the next reset. There is **no** "update from GitHub" route and the device never fetches firmware on its own — an update only happens when an authenticated caller pushes one. See [Updates](updates).
+* **Firmware updates can arrive over the network, and that surface is deliberately narrow.** The device uses a **dual-slot** flash layout (`with_ota.csv`): two application partitions and an `otadata` selector, so a new image is written into the slot the device is *not* running from. Uploading is `POST /api/ota/firmware`, which requires **both** Web UI authentication (`basicAuth()`) and **HTTPS** (`haRequireTls()`) — a plain-HTTP upload is refused. The image is validated with `esp_ota_end()` before it is ever made bootable, and `CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y` means a newly flashed image that fails to confirm itself is abandoned in favour of the previous slot on the next reset. There is **no** "update from GitHub" route and the device never fetches firmware on its own — an update only happens when an authenticated caller pushes one. See [Updates](/HomeKey-ESP32/updates/).
 
 * **The setup access point password is the documented default until you change it.** Two APs can appear while a device has no network: the project's own `HK_XXXXXX` captive portal and HomeSpan's `HomeSpan-Setup`. Both use the setup AP password so they cannot be opened with two different published values. On a device that has not been through first-run setup that value is `HomeKey$123$`, so **set your own on the setup screen** - the AP only exists before the device is provisioned, but it is still a way in while it is up.
 
@@ -197,7 +197,7 @@ This fork enables all three, unlike upstream:
 > [!IMPORTANT]
 > **All three of these are currently DISABLED in `sdkconfig.defaults`.** The
 > settings below describe what enabling them does; the actual staged procedure
-> lives in **[Security Rollout Plan: Path 1 → Path 2](path2_security_rollout)**.
+> lives in **[Security Rollout Plan: Path 1 → Path 2](/HomeKey-ESP32/path2_security_rollout/)**.
 
 The original ESP32 only supports **Secure Boot V1**, which requires an **ECDSA-P256** key; RSA-based Secure Boot V2 is not available on this chip.
 
@@ -226,7 +226,7 @@ how much freedom you keep. Pick deliberately — the eFuse burn cannot be undone
 > **This fork currently ships with both features DISABLED ("Path 1").** The board
 > is fully reversible and no eFuse has been burned. Turning them on is **Path 2**,
 > a deferred one-way rollout with its own staged procedure and prerequisites:
-> see **[Security Rollout Plan: Path 1 → Path 2](path2_security_rollout)**.
+> see **[Security Rollout Plan: Path 1 → Path 2](/HomeKey-ESP32/path2_security_rollout/)**.
 > Do not enable anything below until that document's prerequisites are met.
 
 | # | Option | What it does | Reversible? |
@@ -260,7 +260,7 @@ CONFIG_SECURE_FLASH_ENCRYPTION_MODE_DEVELOPMENT=y
 > off-machine before Stage 1 of the rollout.
 >
 > Because of this, the rollout in
-> **[Security Rollout Plan: Path 1 → Path 2](path2_security_rollout)** proceeds in
+> **[Security Rollout Plan: Path 1 → Path 2](/HomeKey-ESP32/path2_security_rollout/)** proceeds in
 > stages — flash encryption first, then NVS encryption, then Secure Boot, then
 > release mode — verifying each before starting the next.
 
@@ -296,7 +296,7 @@ idf.py -p /dev/cu.usbserial-0001 efuse-summary
 > `efuse-burn`, `efuse-summary` and `secure-generate-flash-encryption-key`.
 
 On a virgin chip, enabling encryption requires the eFuse to be burned first.
-Follow **[Security Rollout Plan: Path 1 → Path 2](path2_security_rollout)** rather
+Follow **[Security Rollout Plan: Path 1 → Path 2](/HomeKey-ESP32/path2_security_rollout/)** rather
 than improvising — it walks through the key generation, the eFuse burn, and the
 staged verification in the order ESP-IDF expects.
 

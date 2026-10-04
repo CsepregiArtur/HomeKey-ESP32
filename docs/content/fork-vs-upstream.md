@@ -85,7 +85,7 @@ update. The password lives in the **macOS Keychain**, the device's certificate i
 **pinned by fingerprint**, and `--prepare-for-ui` writes a correctly-named image for
 the Web UI uploader.
 
-See [Updates](updates).
+See [Updates](/HomeKey-ESP32/updates/).
 
 ## 2. Household / multi-node architecture
 
@@ -111,7 +111,7 @@ New firmware modules (none of these exist upstream):
 | `AuditManager` | Bounded 256-record security event log |
 | `HealthManager` | Aggregated health snapshot |
 
-See [Household & Node Architecture](household).
+See [Household & Node Architecture](/HomeKey-ESP32/household/).
 
 ## 3. Encrypted, signed backups
 
@@ -147,8 +147,8 @@ homekey/household/<household_id>/nodes/<node_id>/
 Legacy topics remain functional but are classified **legacy/internal** — the
 household integration must not depend on them.
 
-See [MQTT Household API](mqtt_household_api) and
-[MQTT API Contract Matrix](mqtt_api_contract_matrix).
+See [MQTT Household API](/HomeKey-ESP32/mqtt_household_api/) and
+[MQTT API Contract Matrix](/HomeKey-ESP32/mqtt_api_contract_matrix/).
 
 ## 5. Hardware: fewer options, two tested targets
 
@@ -172,7 +172,7 @@ from the Arduino core's per-chip variant. See
 > **This fork *implements* flash encryption, Secure Boot V1 and NVS encryption.
 > Upstream deliberately does not.** They are **disabled by default** in this fork
 > so the board stays reversible; turning them on is a deferred, one-way rollout
-> described in [Security Rollout Plan: Path 1 → Path 2](path2_security_rollout).
+> described in [Security Rollout Plan: Path 1 → Path 2](/HomeKey-ESP32/path2_security_rollout/).
 > Once enabled it is irreversible and destroys data on existing devices.
 
 | Protection | Upstream | This fork |
@@ -203,7 +203,7 @@ When Path 2 is executed, be aware that:
   safe off-machine, or the device can never be updated again.
 
 See [Security](/HomeKey-ESP32/security/#flash-encryption-secure-boot-and-nvs-encryption) and
-[Updates](updates).
+[Updates](/HomeKey-ESP32/updates/).
 
 ## 7. What is unchanged from upstream
 
@@ -219,7 +219,7 @@ To be explicit, this fork does **not** touch:
 ## 8. Migrating from upstream
 
 1. **Back up** your household recovery secret and note your configuration.
-2. Flash over **serial** — see [Updates](updates). A partition table cannot be
+2. Flash over **serial** — see [Updates](/HomeKey-ESP32/updates/). A partition table cannot be
    delivered over the air.
 3. Re-provision: Wi-Fi, HomeKit pairing and HomeKey enrolment are reset by the
    partition-layout change.
@@ -229,15 +229,15 @@ To be explicit, this fork does **not** touch:
 
 > Enabling the security features is a **separate, deferred step**. Do not generate a
 > signing key or burn eFuses as part of a normal migration — follow
-> **[Security Rollout Plan: Path 1 → Path 2](path2_security_rollout)** when you are
+> **[Security Rollout Plan: Path 1 → Path 2](/HomeKey-ESP32/path2_security_rollout/)** when you are
 > ready for that.
 
 ## Related pages
 
-- [Security Rollout Plan: Path 1 → Path 2](path2_security_rollout)
-- [Household & Node Architecture](household)
-- [MQTT Household API](mqtt_household_api)
-- [MQTT API Contract Matrix](mqtt_api_contract_matrix)
-- [Updates](updates)
-- [Setup](setup)
-- [Security](security)
+- [Security Rollout Plan: Path 1 → Path 2](/HomeKey-ESP32/path2_security_rollout/)
+- [Household & Node Architecture](/HomeKey-ESP32/household/)
+- [MQTT Household API](/HomeKey-ESP32/mqtt_household_api/)
+- [MQTT API Contract Matrix](/HomeKey-ESP32/mqtt_api_contract_matrix/)
+- [Updates](/HomeKey-ESP32/updates/)
+- [Setup](/HomeKey-ESP32/setup/)
+- [Security](/HomeKey-ESP32/security/)

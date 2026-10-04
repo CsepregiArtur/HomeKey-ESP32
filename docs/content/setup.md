@@ -21,7 +21,7 @@ Welcome to the exciting part! This guide will walk you through the process of ge
 > If you are running upstream firmware, use the
 > [upstream documentation](https://rednblkx.github.io/HomeKey-ESP32/setup/) — the
 > reader options and Ethernet settings below do not exist there, and upstream's OTA
-> steps do not apply here. See [Fork vs Upstream](fork-vs-upstream).
+> steps do not apply here. See [Fork vs Upstream](/HomeKey-ESP32/fork-vs-upstream/).
 
 ## 1. Get the Firmware
 
@@ -76,10 +76,10 @@ Before flashing, connect your **PN532** to your ESP32 or ESP32-C3 board.
 > **Only the PN532 is supported in this fork.** The PN7160/PN7161 and ST25R3916
 > backends were removed to free flash for the second OTA slot. If you have one of
 > those modules, you need upstream firmware — see
-> [Fork vs Upstream](fork-vs-upstream).
+> [Fork vs Upstream](/HomeKey-ESP32/fork-vs-upstream/).
 
 * **Using Jumper Wires:** Connect the PN532 to the SPI pins for *your* chip — see [PN532 Module Wiring](#21-pn532-module-wiring).
-* **Using an Integrated PCB Board:** If you have an [Integrated PCB Board](../prerequisites#22-option-b---integrated-pcb-boards), connections are pre-wired. Select the corresponding hardware preset in the Captive Portal or WebUI.
+* **Using an Integrated PCB Board:** If you have an [Integrated PCB Board](/HomeKey-ESP32/prerequisites#22-option-b---integrated-pcb-boards), connections are pre-wired. Select the corresponding hardware preset in the Captive Portal or WebUI.
 
 ### 2.1. PN532 Module Wiring
 
@@ -223,7 +223,7 @@ After flashing, your HomeKey-ESP32 is ready for initial configuration.
     * **Wi-Fi & HomeKit:** Scan and select Wi-Fi network, enter password, set 8-digit HomeKit pairing code, select HomeKey pass color (Tan, Gold, Silver, Black), configure AP Access Point Password (`accessPointPassword`), and optionally enable Web UI authentication with your own username/password.
     * **Hardware Tab:** Select the PN532 reader and a preset, assign custom NFC GPIO pins, and see strapping pin restrictions on conflicting assignments. Override them if required by custom hardware (`overrideStrappingRestriction`).
       > [!NOTE]
-      > **There is no Ethernet section in this fork.** Upstream's "Enable Ethernet", PHY type and SPI-Ethernet fields do not exist here — see [Fork vs Upstream](fork-vs-upstream).
+      > **There is no Ethernet section in this fork.** Upstream's "Enable Ethernet", PHY type and SPI-Ethernet fields do not exist here — see [Fork vs Upstream](/HomeKey-ESP32/fork-vs-upstream/).
 4. **Save & Connect:** Upon clicking "Save", the captive portal submits configuration diffs and connects to your Wi-Fi network. On successful connection, the interface displays the assigned network IP address before closing.
 5. **Finish first-run setup:** Open the device's Web UI on your network. A blocking setup screen asks for your Web UI username and password, HomeKit Setup Code and setup AP password. Until you save it the Web UI has **no login** - see [Security]({{< ref "security" >}}).
 

@@ -240,7 +240,7 @@ card) still works, which is the limitation below.
 Note also that the guest feature stores its tokens in the same NVS partition as the rest
 of the configuration, which is **plaintext at rest** on this firmware (flash encryption
 is a deferred, one-way rollout — see
-[Security Rollout Plan: Path 1 → Path 2](path2_security_rollout)).
+[Security Rollout Plan: Path 1 → Path 2](/HomeKey-ESP32/path2_security_rollout/)).
 
 ## Limits
 

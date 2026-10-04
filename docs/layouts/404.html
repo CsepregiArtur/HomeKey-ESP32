@@ -1,0 +1,47 @@
+{{ define "main" }}
+  <div class="hx:mx-auto hx:flex hx:max-w-screen-xl hx:flex-col hx:items-center hx:justify-center hx:px-4 hx:py-16 hx:text-center">
+    <p class="hx:text-6xl hx:font-bold hx:tracking-tight hx:text-slate-900 hx:dark:text-slate-100">404</p>
+
+    <h1 class="hx:mt-4 hx:text-2xl hx:font-semibold hx:text-slate-900 hx:dark:text-slate-100">
+      This page could not be found
+    </h1>
+
+    <p class="hx:mt-3 hx:max-w-2xl hx:text-base hx:leading-7 hx:text-slate-600 hx:dark:text-slate-400">
+      The address you followed does not match a page on this site. This is usually a link
+      that lost its leading <code>/</code> rather than a page that was deleted — the
+      documentation pages all exist.
+    </p>
+
+    <p class="hx:mt-2 hx:max-w-2xl hx:text-base hx:leading-7 hx:text-slate-600 hx:dark:text-slate-400">
+      If you arrived here from another page on this site, that link is a bug worth
+      <a href="https://github.com/CsepregiArtur/HomeKey-ESP32/issues" class="hx:text-primary-600 hx:underline hx:dark:text-primary-400">reporting</a>.
+    </p>
+
+    <div class="hx:mt-10 hx:w-full hx:max-w-3xl">
+      <p class="hx:mb-4 hx:text-sm hx:font-semibold hx:uppercase hx:tracking-wide hx:text-slate-500 hx:dark:text-slate-400">
+        Start here
+      </p>
+      <div class="hx:grid hx:grid-cols-1 hx:gap-3 sm:hx:grid-cols-2">
+        {{ range slice
+          (dict "title" "Home" "url" "/" "desc" "The documentation index")
+          (dict "title" "Fork vs Upstream" "url" "/fork-vs-upstream/" "desc" "What this fork changes, and what it removes")
+          (dict "title" "Setup" "url" "/setup/" "desc" "Wiring, flashing, first-run configuration")
+          (dict "title" "Configuration" "url" "/configuration/" "desc" "Every Web UI setting")
+          (dict "title" "Updating firmware" "url" "/updates/" "desc" "Over the LAN or over the cable")
+          (dict "title" "Security" "url" "/security/" "desc" "Threat model and credentials")
+          (dict "title" "Home Assistant Integration" "url" "/home-assistant/" "desc" "The homekey_household component")
+          (dict "title" "Troubleshooting" "url" "/troubleshooting/" "desc" "Common problems")
+        }}
+          {{ $url := printf "%s%s" (strings.TrimSuffix "/" site.BaseURL) .url }}
+          <a href="{{ $url }}"
+             class="hx:block hx:rounded-lg hx:border hx:border-gray-200 hx:px-4 hx:py-3 hx:text-left hx:transition-colors hx:hover:border-primary-400 hx:hover:bg-gray-50 hx:dark:border-neutral-800 hx:dark:hover:border-primary-600 hx:dark:hover:bg-neutral-900">
+            <span class="hx:block hx:font-medium hx:text-slate-900 hx:dark:text-slate-100">{{ .title }}</span>
+            <span class="hx:mt-0.5 hx:block hx:text-sm hx:text-slate-500 hx:dark:text-slate-400">{{ .desc }}</span>
+          </a>
+        {{ end }}
+      </div>
+    </div>
+  </div>
+
+  <script defer src="{{ "js/404-recover.js" | relURL }}"></script>
+{{ end }}

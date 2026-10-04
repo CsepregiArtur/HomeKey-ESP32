@@ -9,7 +9,7 @@ weight: 8
 > **Fork-only feature.** Upstream [rednblkx/HomeKey-ESP32](https://github.com/rednblkx/HomeKey-ESP32)
 > has **no** household, node identity, backup or recovery concept — there a device is
 > standalone. This entire page describes behaviour that exists **only in this fork**.
-> See [Fork vs Upstream](fork-vs-upstream).
+> See [Fork vs Upstream](/HomeKey-ESP32/fork-vs-upstream/).
 
 HomeKey-ESP32 can run as a single device or as part of a **Household**: a group of
 nodes (gate, main house, small house, garage, workshop) that share trust and recovery
@@ -180,7 +180,7 @@ explicit one-time export.
 
 ## Threat model & limitations
 
-See [Security](security) for the full threat model. Additional notes for households:
+See [Security](/HomeKey-ESP32/security/) for the full threat model. Additional notes for households:
 
 - Physical access to a node is still a total compromise of that node (flash is not
   encrypted by design; see [Security](/HomeKey-ESP32/security/#physical-access)).

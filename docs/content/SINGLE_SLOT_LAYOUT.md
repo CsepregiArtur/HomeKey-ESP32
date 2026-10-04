@@ -8,7 +8,7 @@ weight: 15
 > [!NOTE]
 > **This is no longer the active layout.** The device is back on the dual-slot
 > table `with_ota.csv` so it can be updated over the network — see
-> **[Updating firmware](updates)**. This page is kept because `no_ota.csv` is
+> **[Updating firmware](/HomeKey-ESP32/updates/)**. This page is kept because `no_ota.csv` is
 > still in the tree: it trades the ability to update over the air for ~47
 > percentage points of application-partition headroom (roughly 8% free in
 > dual-slot, ~55% free here), and moving between the two is a serial flash in

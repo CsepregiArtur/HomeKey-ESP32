@@ -4,6 +4,13 @@ title: HomeKey-ESP32 Wiki
 enableRobotsTXT: true
 enableGitInfo: true
 
+markup:
+  goldmark:
+    renderer:
+      # The 404 layout needs an inline script to recover mis-rooted links, and the
+      # docs pages embed raw HTML in a few places. Without this GoldMark strips both.
+      unsafe: true
+
 module:
   imports:
     - path: github.com/imfing/hextra

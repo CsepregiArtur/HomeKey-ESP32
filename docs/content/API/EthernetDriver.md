@@ -27,7 +27,7 @@ deployment is a Wi-Fi device near the door.
 | If you… | Then… |
 | --- | --- |
 | Use Wi-Fi, or have never configured Ethernet | **Nothing to do.** This fork is what you want. |
-| Rely on wired Ethernet for reliability | Use **upstream firmware**, which still has this module. See [Fork vs Upstream](../fork-vs-upstream). |
+| Rely on wired Ethernet for reliability | Use **upstream firmware**, which still has this module. See [Fork vs Upstream](/HomeKey-ESP32/fork-vs-upstream/). |
 
 ### What upstream's version did
 
@@ -42,6 +42,6 @@ by a board preset (`ethActivePreset`) or custom pin arrays
 
 ### See also
 
-- [Fork vs Upstream](../fork-vs-upstream) — the full list of removals and why
-- [Updates](../updates) — the dual-slot layout that the removal paid for
-- [Configuration](../configuration#522-nfc-reader-configuration) — the current hardware settings
+- [Fork vs Upstream](/HomeKey-ESP32/fork-vs-upstream/) — the full list of removals and why
+- [Updates](/HomeKey-ESP32/updates/) — the dual-slot layout that the removal paid for
+- [Configuration](/HomeKey-ESP32/configuration#522-nfc-reader-configuration) — the current hardware settings

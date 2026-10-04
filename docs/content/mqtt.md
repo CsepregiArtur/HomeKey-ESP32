@@ -25,7 +25,7 @@ The `UNLOCKING` and `LOCKING` states are used to indicate that the lock is in th
 
 ## 2. Core MQTT Topics: The Main Conversation
 
-Your HomeKey-ESP32 communicates its status and listens for commands on these core MQTT topics. Remember, you can customize these topics in the device's [Web Interface Configuration](../configuration#321-core-topics)!
+Your HomeKey-ESP32 communicates its status and listens for commands on these core MQTT topics. Remember, you can customize these topics in the device's [Web Interface Configuration](/HomeKey-ESP32/configuration#321-core-topics)!
 
 | Topic | Description | Payload Examples |
 | :---- | :---------- | :--------------- |
@@ -37,7 +37,7 @@ Your HomeKey-ESP32 communicates its status and listens for commands on these cor
 | `<CLIENT_ID>/alt_action` | **Publishes** the status of the Alternate Action. | `1` (sent when the alternate action is triggered) |
 
 > [!NOTE]
-> You will notice all topics set by default are prefixed by the client id, this was done so the topics are nicely organized under a unique identifier, however, you can set the topics to whatever you wish from the [WebUI](../configuration#321-core-topics)
+> You will notice all topics set by default are prefixed by the client id, this was done so the topics are nicely organized under a unique identifier, however, you can set the topics to whatever you wish from the [WebUI](/HomeKey-ESP32/configuration#321-core-topics)
 
 **Example: Manually Locking Your Door via MQTT**
 
@@ -85,7 +85,7 @@ The project supports custom states, allowing you to map the lock's internal stat
 *   **`<CLIENT_ID>/homekit/custom_state`**: **Publishes** the custom lock action. When custom states are enabled, this topic receives an update whenever the lock reaches a final state — it publishes the configured `Unlock` action value when the target state becomes `UNLOCKED`, and the configured `Lock` action value when the target state becomes `LOCKED` (e.g., after a HomeKey tap, Home app control, or MQTT command). Transitional states (`UNLOCKING`/`LOCKING`) are not published to this topic.
 *   **`<CLIENT_ID>/homekit/set_custom_state`**: **Subscribes** to this topic to set the custom lock state. Accepts the configured numeric values for `Unlocking`, `Locking`, `Unlocked`, `Locked`, `Jammed`, and `Unknown`.
 
-You can enable and configure custom states, including defining your own custom lock actions and states, in the [Web Interface Configuration](../configuration/#322-custom-lock-states--actions) under the "Custom Lock States & Actions" section.
+You can enable and configure custom states, including defining your own custom lock actions and states, in the [Web Interface Configuration](/HomeKey-ESP32/configuration/#322-custom-lock-states--actions) under the "Custom Lock States & Actions" section.
 
 ## 4. NFC Data: Who Just Tapped? 🕵️‍♀️
 
@@ -135,7 +135,7 @@ This project plays nicely with Home Assistant, allowing you to manage your lock 
 
 Home Assistant has a feature called [MQTT Discovery](https://www.home-assistant.io/integrations/mqtt/) used to automatically configure a component.
 
-If **HASS MQTT Discovery** is enabled in your device's [MQTT Configuration](../configuration#3-mqtt), the project will automatically publish the necessary configuration for Home Assistant to discover and control the lock. No manual YAML configuration needed – Home Assistant will just *find* it!
+If **HASS MQTT Discovery** is enabled in your device's [MQTT Configuration](/HomeKey-ESP32/configuration#3-mqtt), the project will automatically publish the necessary configuration for Home Assistant to discover and control the lock. No manual YAML configuration needed – Home Assistant will just *find* it!
 
 *   **Important:** MQTT Discovery is enabled by default. You can disable it in the device's WebUI configuration if you don't want the entities to be auto-discovered.
 *   The following entities are published:
@@ -170,7 +170,7 @@ This is where the real fun begins! Your HomeKey-ESP32 can integrate with Home As
 > [!TIP]
 > **You do not need MQTT to use Home Assistant with this fork.** There is a custom
 > component that talks to the node **directly over its pinned HTTPS API, with no broker
-> at all** — see [Home Assistant Integration](home-assistant). The MQTT path documented
+> at all** — see [Home Assistant Integration](/HomeKey-ESP32/home-assistant/). The MQTT path documented
 > here is kept for people who already run a broker.
 *   **Creating Automations:** Once a tag is discovered in Home Assistant, you can name it and create custom automations based on its scan. For example, scan a tag to:
     *   Unlock the door.
