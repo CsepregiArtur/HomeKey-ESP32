@@ -12,6 +12,13 @@ on:
     paths:
       - 'docs/**'
     tags:
+      # Only version tags deploy the site. `paths` filters are NOT evaluated for
+      # tag pushes, so every matching tag used to trigger a deploy. Environment
+      # protection rules on `github-pages` only allow deployments from protected
+      # refs (e.g. main), which rejected tag deployments with:
+      #   "Tag 'vX.Y.Z' is not allowed to deploy to github-pages due to
+      #    environment protection rules."
+      # Deploy jobs now additionally guard with the `deploy` job condition.
       - 'v0.*'
 
   workflow_dispatch:
@@ -31,7 +38,10 @@ defaults:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    # Pinned to a specific Ubuntu LTS: `ubuntu-latest` migrates to Ubuntu 26 on
+    # October 19, 2026 (actions/runner-images#14748), which would silently move
+    # this job. Pin so the hugo/dpkg toolchain stays reproducible.
+    runs-on: ubuntu-24.04
     env:
       HUGO_VERSION: 0.164.0
     steps:
@@ -43,7 +53,15 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v6
         with:
-          go-version: '1.26'
+          # Pin to the toolchain the docs module declares (docs/go.mod). Hugo's
+          # `hugo mod get` runs in docs/, and a Go version lower than the module
+          # directive makes the command try (and fail) to auto-download a
+          # toolchain instead of caching. `cache-dependency-path` also points
+          # setup-go's dependency cache at docs/go.mod -- by default it looks for
+          # go.mod at the repository root, which does not exist here, producing
+          # "Dependencies file is not found in ... Supported file pattern: go.mod".
+          go-version: '1.24'
+          cache-dependency-path: docs/go.sum
       - name: Setup Pages
         id: pages
         uses: actions/configure-pages@v6
@@ -179,10 +197,17 @@ jobs:
           path: ${{ runner.temp }}/site
 
   deploy:
+    # Deployment is gated to branch refs only. The `github-pages` environment
+    # has protection rules that reject tag refs ("Tag ... is not allowed to
+    # deploy to github-pages due to environment protection rules"), so tag
+    # pushes build the versioned site but never attempt to deploy it.
+    # A release still publishes the wiki by the normal flow: the tag is built
+    # here, and the docs on main deploy the site.
+    if: ${{ github.ref_type == 'branch' }}
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: build
     steps:
       - name: Deploy to GitHub Pages

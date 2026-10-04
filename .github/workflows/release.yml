@@ -5,7 +5,9 @@ on:
 
 jobs:
   release-assets:
-    runs-on: ubuntu-latest
+    # Pinned to a specific Ubuntu LTS (see actions/runner-images#14748:
+    # ubuntu-latest migrates to Ubuntu 26 on 2026-10-19).
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
       actions: read

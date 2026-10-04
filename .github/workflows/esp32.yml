@@ -22,7 +22,9 @@ concurrency:
 
 jobs:
   cleanup-dev-release:
-    runs-on: ubuntu-latest
+    # Pinned to a specific Ubuntu LTS (see actions/runner-images#14748:
+    # ubuntu-latest migrates to Ubuntu 26 on 2026-10-19).
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
     if: ${{ github.ref == 'refs/heads/main' }}
@@ -116,7 +118,7 @@ jobs:
             }
 
   littlefs:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -164,7 +166,7 @@ jobs:
           path: data/littlefs.bin
 
   esp-idf-builds:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: littlefs
     strategy:
       fail-fast: false
@@ -251,7 +253,7 @@ jobs:
           path: build/${{ matrix.target }}.firmware.factory.bin
 
   pre-release:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
     if: ${{ github.ref == 'refs/heads/main' }}
