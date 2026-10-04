@@ -111,6 +111,54 @@ def flash_layout() -> dict[str, int]:
     return layout
 
 
+def build_target() -> str | None:
+    """The target the current build directory was actually configured for."""
+    desc = BUILD_DIR / "project_description.json"
+    if not desc.exists():
+        return None
+    try:
+        return json.loads(desc.read_text()).get("target")
+    except (ValueError, OSError):
+        return None
+
+
+def check_build_consistency() -> None:
+    """Refuse to flash when the build directory describes two different chips.
+
+    `flash_args` and `project_description.json` are both generated, but by different
+    steps, and they can disagree: this tree keeps a checked-in root `sdkconfig`, which
+    IDF prefers over the target passed to `set-target`. That makes a target switch
+    silently revert while `flash_args` keeps the offsets from the other chip's generate
+    step - so the offset lookup would take a bootloader offset from a build that is not
+    the build being written. The mismatch is exactly what writes a bootloader to the
+    wrong address, and there is no way to tell from the numbers alone which file is
+    right, so this stops rather than picks one.
+    """
+    target = build_target()
+    if target is None:
+        return
+
+    layout = flash_layout()
+    boot = layout["bootloader"]
+    # A C3 (and the other RISC-V parts) boot from 0x0; every Xtensa part uses 0x1000.
+    expect_zero = target.startswith("esp32c") or target in ("esp32h2", "esp32p4")
+    if expect_zero and boot != 0x0:
+        die(
+            f"build/flash_args places the bootloader at 0x{boot:X} but the build targets "
+            f"'{target}', which boots from 0x0. The build directory describes two "
+            f"different chips; write to it would put the bootloader at the wrong "
+            f"address. Rebuild from clean:\n"
+            f"    rm -rf build && ./scripts/build_esp32c3.sh set-target && "
+            f"./scripts/build_esp32c3.sh build"
+        )
+    if not expect_zero and boot == 0x0:
+        die(
+            f"build/flash_args places the bootloader at 0x0 but the build targets "
+            f"'{target}', which boots from 0x1000. The build directory is inconsistent; "
+            f"rebuild from clean before flashing."
+        )
+
+
 # Every image the cable flow writes. Checked once, before anything is detected or
 # written, so all four entry points fail with the same sentence instead of a
 # FileNotFoundError from whichever .stat() happens to run first.
@@ -119,19 +167,22 @@ REQUIRED_IMAGES = (("application", APP_BIN), ("bootloader", BOOTLOADER_BIN),
 
 
 def require_build_artifacts() -> None:
-    """Fail early and clearly when the tree has not been built (or built fully)."""
+    """Fail early and clearly when the tree has not been built (or built fully).
+
+    An image that exists but is empty is treated as missing: a failed link leaves a
+    zero-byte `HomeKey-ESP32.elf` behind and `idf.py build` can still exit 0, so a
+    plain `exists()` check would pass and the flash would write nothing at that offset.
+    """
     missing = [
         (label, path)
         for label, path in REQUIRED_IMAGES
-        if not path.exists()
+        if not path.exists() or path.stat().st_size == 0
     ]
     if not missing:
         return
-    details = "\n".join(
-        f"    {label:<16} {rel(path)}" for label, path in missing
-    )
+    details = "\n".join(f"    {label:<16} {rel(path)}" for label, path in missing)
     die(
-        f"the build is missing {len(missing)} image(s):\n{details}\n"
+        f"the build is missing or empty for {len(missing)} image(s):\n{details}\n"
         f"  Build the firmware first. Nothing was written.\n"
         f"  For an ESP32-C3 use ./scripts/build_esp32c3.sh build (a plain "
         f"idf.py set-target fails on this host; see that script for why)."
@@ -914,6 +965,9 @@ def serial_flash(port: str, layout: Path, *, with_fs: bool, chip: str | None = N
 
     # Chip-specific: the bootloader is at 0x0 on a C3 and 0x1000 on a classic ESP32.
     offsets = flash_layout()
+    # flash_args and project_description.json can disagree when a target switch did not
+    # take effect; a mismatch means the offsets do not describe the build being written.
+    check_build_consistency()
 
     writes = [
         (offsets["bootloader"], BOOTLOADER_BIN),
@@ -931,7 +985,7 @@ def serial_flash(port: str, layout: Path, *, with_fs: bool, chip: str | None = N
 
     say(f"\nWriting to {port} using {layout.name}:")
     for offset, path in writes:
-        say(f"  0x{offset:06X}  {path.relative_to(REPO_ROOT)}  ({human(path.stat().st_size)})")
+        say(f"  0x{offset:06X}  {rel(path)}  ({human(path.stat().st_size)})")
 
     for baud in (DEFAULT_BAUD, FALLBACK_BAUD):
         cmd = esptool + [

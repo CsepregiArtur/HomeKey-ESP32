@@ -93,7 +93,26 @@ export CMAKE_POLICY_VERSION_MINIMUM=3.5
 ACTION="${1:-build}"
 case "$ACTION" in
   set-target)
+    # The root sdkconfig is the reason `rm -rf build` alone is not enough.
+    #
+    # `idf.py set-target` applies the requested target through build/CMakeCache and a
+    # generated sdkconfig *only when there is no sdkconfig to prefer*. This tree keeps a
+    # checked-in sdkconfig at the repo root (a classic-ESP32 one), and IDF reads that in
+    # preference to the target argument. So a plain `rm -rf build && idf.py set-target
+    # esp32c3` silently builds for esp32 instead, while build/flash_args keeps the C3
+    # offsets from the generate step - two files in the same directory describing
+    # different chips. That combination is worse than either: the offset lookup reads
+    # flash_args, so it would write an esp32 bootloader to 0x0, which is where a C3
+    # bootloader goes and where an esp32 one does not.
+    #
+    # Moving it aside (not deleting it) keeps the configured values recoverable and
+    # lets set-target write a fresh sdkconfig for the new target.
     rm -rf build
+    if [ -f sdkconfig ]; then
+      backup="sdkconfig.esp32.bak"
+      mv sdkconfig "$backup"
+      echo "existing sdkconfig moved to $backup so the target switch can take effect"
+    fi
     exec idf.py set-target esp32c3
     ;;
   build|"")
