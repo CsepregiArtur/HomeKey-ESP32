@@ -50,11 +50,17 @@ BOOTLOADER_BIN = BUILD_DIR / "bootloader" / "bootloader.bin"
 PARTITION_BIN = BUILD_DIR / "partition_table" / "partition-table.bin"
 SPIFFS_BIN = BUILD_DIR / "spiffs.bin"
 
-FLASH_OFFSETS = {
-    "bootloader": 0x1000,
-    "partition-table": 0x8000,
-    "app": 0x20000,  # replaced by the real offset from the partition table
-}
+def rel(path: Path) -> str:
+    """Path relative to the repo when it is inside it, else the absolute path.
+
+    `Path.relative_to` raises when the path is outside REPO_ROOT, which would turn a
+    clear error message into a traceback. BUILD_DIR is normally inside the repo, but
+    an overridden or relocated build directory should not crash the error path.
+    """
+    try:
+        return str(path.relative_to(REPO_ROOT))
+    except ValueError:
+        return str(path)
 
 
 def flash_layout() -> dict[str, int]:
@@ -63,14 +69,23 @@ def flash_layout() -> dict[str, int]:
     The bootloader offset is NOT the same on every chip: a classic ESP32 puts it at
     0x1000, while an ESP32-C3 (and the other RISC-V parts) put it at 0x0. Writing a C3
     bootloader to 0x1000 leaves the chip with no valid bootloader and it prints
-    `invalid header: 0xffffffff` forever, so this is read from the build's own
-    `flash_args` rather than assumed. The keys are the file names IDF emits there.
+    `invalid header: 0xffffffff` forever.
+
+    There is deliberately no fallback offset table. `flash_args` is written by IDF in
+    the same directory as the images, so its absence means the build is not a finished
+    IDF build, and guessing 0x1000 for an unknown chip is exactly the mistake this
+    function exists to prevent. A missing file is an error, not a default.
     """
-    layout = dict(FLASH_OFFSETS)
     args = BUILD_DIR / "flash_args"
     if not args.exists():
-        return layout
+        die(
+            f"{rel(args)} is missing, so the flash offsets for this chip are unknown. "
+            f"Build the firmware first (idf.py build or ./scripts/build_esp32c3.sh "
+            f"build); the bootloader offset differs between chips and cannot be "
+            f"guessed safely."
+        )
 
+    layout: dict[str, int] = {}
     known = {
         "bootloader/bootloader.bin": "bootloader",
         "partition_table/partition-table.bin": "partition-table",
@@ -86,7 +101,42 @@ def flash_layout() -> dict[str, int]:
         key = known.get(path)
         if key:
             layout[key] = int(offset, 0)
+
+    missing = [k for k in ("bootloader", "partition-table") if k not in layout]
+    if missing:
+        die(
+            f"{rel(args)} does not name the {', '.join(missing)} image(s), so the build "
+            f"is incomplete. Rebuild before flashing."
+        )
     return layout
+
+
+# Every image the cable flow writes. Checked once, before anything is detected or
+# written, so all four entry points fail with the same sentence instead of a
+# FileNotFoundError from whichever .stat() happens to run first.
+REQUIRED_IMAGES = (("application", APP_BIN), ("bootloader", BOOTLOADER_BIN),
+                   ("partition table", PARTITION_BIN))
+
+
+def require_build_artifacts() -> None:
+    """Fail early and clearly when the tree has not been built (or built fully)."""
+    missing = [
+        (label, path)
+        for label, path in REQUIRED_IMAGES
+        if not path.exists()
+    ]
+    if not missing:
+        return
+    details = "\n".join(
+        f"    {label:<16} {rel(path)}" for label, path in missing
+    )
+    die(
+        f"the build is missing {len(missing)} image(s):\n{details}\n"
+        f"  Build the firmware first. Nothing was written.\n"
+        f"  For an ESP32-C3 use ./scripts/build_esp32c3.sh build (a plain "
+        f"idf.py set-target fails on this host; see that script for why)."
+    )
+
 
 MDNS_SERVICE = "_homekey._tcp"
 KEYCHAIN_SERVICE = "homekey-esp32-ota"
@@ -762,7 +812,10 @@ def detect_chip(esptool: list[str], port: str) -> ChipInfo | None:
         text=True,
     )
     output = ((proc.stdout or "") + (proc.stderr or "")).replace("\r", "")
-    if proc.returncode != 0 or "Detecting chip type" in output and "Chip is" not in output:
+    # Only the exit code decides whether detection failed. A non-zero exit means no
+    # usable answer; the parsers below already return None when no chip name is found,
+    # so a text guard here would only reject outputs that actually parsed fine.
+    if proc.returncode != 0:
         return None
 
     description = ""
@@ -814,19 +867,22 @@ def serial_flash(port: str, layout: Path, *, with_fs: bool, chip: str | None = N
         die("esptool not found. Install it, or run this from a shell with "
             "~/esp/esp-idf/export.sh sourced.")
 
-    for required in (APP_BIN, BOOTLOADER_BIN, PARTITION_BIN):
-        if not required.exists():
-            die(f"{required} is missing - build the firmware first (idf.py build)")
+    require_build_artifacts()
 
     detected = detect_chip(esptool, port)
     if detected is None:
-        die(
-            f"could not read the chip on {port}. Is the device in the bootloader "
-            f"(hold BOOT), the right port chosen, and not held open by a serial monitor? "
-            f"Pass --chip to skip detection."
-        )
-
-    if chip and chip != detected.chip:
+        if chip is None:
+            die(
+                f"could not read the chip on {port}. Is the device in the bootloader "
+                f"(hold BOOT), the right port chosen, and not held open by a serial "
+                f"monitor? Pass --chip to proceed without detection."
+            )
+        # --chip is the documented escape hatch for a board that will not answer
+        # chip_id; honour it rather than dying and telling the user to pass the flag
+        # that was already passed.
+        say(f"Nothing answered on {port}; trusting --chip {chip} as requested.")
+        detected = ChipInfo(chip=chip, description=f"assumed {chip} (detection skipped)")
+    elif chip and chip != detected.chip:
         say(f"Note: --chip says {chip} but the device is {detected.chip}; using the device's own.")
 
     say(f"\nChip: {detected.describe()}")
@@ -932,6 +988,12 @@ def rebuild_for(target: str) -> bool:
 
 def flash_over_cable(args: argparse.Namespace) -> int:
     """Detect the board, make sure the build matches it, then write it."""
+    # Checked before anything touches the device: with --no-build there is nothing
+    # left that could produce these files, so failing here saves a pointless port
+    # probe and, more importantly, reports the real problem first.
+    if args.no_build:
+        require_build_artifacts()
+
     ports = [args.port] if args.port else serial_ports()
     if not ports:
         say("No serial port found. Connect the device with a USB cable, or pass --port.")
@@ -953,8 +1015,13 @@ def flash_over_cable(args: argparse.Namespace) -> int:
 
     detected = detect_chip(esptool, port)
     if detected is None:
-        die(f"nothing answered on {port}. Check the cable, the port, and that no serial "
-            f"monitor is holding it open.")
+        if args.chip is None:
+            die(f"nothing answered on {port}. Check the cable, the port, and that no serial "
+                f"monitor is holding it open. Pass --chip to proceed without detection.")
+        say(f"Nothing answered on {port}; trusting --chip {args.chip} as requested.")
+        detected = ChipInfo(
+            chip=args.chip, description=f"assumed {args.chip} (detection skipped)"
+        )
 
     say(f"\nDevice on {port}: {detected.describe()}")
 
@@ -972,7 +1039,13 @@ def flash_over_cable(args: argparse.Namespace) -> int:
     if built_for and built_for != detected.chip:
         say(f"The build in build/ targets '{built_for}' but this device is '{detected.chip}'.")
         if args.no_build:
-            die("pass --port to flash anyway once the build matches, or drop --no-build")
+            die(
+                f"--no-build was given, so the build was not switched from '{built_for}' "
+                f"to '{detected.chip}'. Nothing was written. Either drop --no-build to "
+                f"rebuild automatically, or switch it yourself:"
+                f"\n    ./scripts/build_esp32c3.sh set-target   # or: idf.py set-target "
+                f"{detected.chip}"
+            )
         if detected.chip not in SUPPORTED_TARGETS:
             die(
                 f"firmware for '{detected.chip}' cannot be built from this tree as it is "
@@ -997,7 +1070,9 @@ def flash_over_cable(args: argparse.Namespace) -> int:
             say("Nothing to do.")
             return 0
 
-    ok = serial_flash(port, REPO_ROOT / args.layout, with_fs=args.with_fs)
+    ok = serial_flash(
+        port, REPO_ROOT / args.layout, with_fs=args.with_fs, chip=args.chip
+    )
     if ok:
         offer_ui_bundle(APP_BIN, parse_partition_csv(REPO_ROOT / args.layout)["app0"][0])
     return 0 if ok else 1
@@ -1062,8 +1137,13 @@ def interactive_device_pick(devices: list[Device], password: str) -> list[Device
 
 def network_flow(args: argparse.Namespace, keychain: Keychain) -> int:
     image = Path(args.image) if args.image else APP_BIN
-    if not image.exists():
-        die(f"{image} does not exist - build the firmware first (idf.py build)")
+    if args.image:
+        if not image.exists():
+            die(f"{image} does not exist")
+    else:
+        # The default image is the build output, so check the whole build at once
+        # rather than letting the user discover a missing bootloader mid-flash.
+        require_build_artifacts()
 
     name = image.name
     if "bootloader" in name or "partition" in name or name == "spiffs.bin":
