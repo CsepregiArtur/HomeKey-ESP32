@@ -79,42 +79,43 @@ elseif(NOT GIT_EXACT_TAG AND GIT_COMMIT_HASH)
 endif()
 
 # ---------------------------------------------------------------------------
-# Re-apply the local ACK diagnostic to the pinned pn532_cxx submodule.
+# Apply the local PN532 driver patches to the pinned submodules.
 #
-# `waitForAck()` compares the six-byte ACK against the expected frame and returns
-# INVALID_FRAME with no other detail. That single error code covers two situations that
-# need opposite fixes:
+# components/pn532_cxx and components/pn532_hal are submodules of rednblkx/pn532_cxx
+# and rednblkx/esp-hal-pn532. Their working trees sit on a detached HEAD and this
+# project has no push access - so a commit there would be unreachable and discarded by
+# the next `git submodule update`. Instead the local driver changes (including the ACK
+# diagnostic that used to be applied inline here) are kept as patch files under
+# patches/ and applied at configure time: the submodules stay at their pinned SHAs, the
+# changes are visible in this repository's history, and they survive a submodule
+# update.
 #
-#   * a floating MISO line - nothing is driving it - reads back all 00 or all FF
-#   * a real but wrong frame means the chip IS talking, just not the SPI protocol
-#
-# Logging the bytes actually received tells the two apart immediately, which matters
-# because the pin numbers differ per chip and a mis-wired bus looks identical to a
-# protocol mismatch from the caller's side.
-#
-# It cannot live in components/pn532_cxx: that directory is a submodule of
-# rednblkx/pn532_cxx, the working tree sits on a detached HEAD, and this project has no
-# push access - so a commit there would be unreachable and discarded by the next
-# `git submodule update`. Applying it here instead keeps the submodule at its pinned
-# SHA, keeps the change visible in this repository's history, and makes it survive a
-# submodule update. Idempotent: the marker check means a second configure is a no-op.
+# Idempotent: a patch whose content is already present makes `git apply --check` fail,
+# so it is skipped and a second configure is a no-op.
 # ---------------------------------------------------------------------------
-set(_pn532_txn "${CMAKE_CURRENT_LIST_DIR}/components/pn532_cxx/src/transaction.cpp")
-if(EXISTS "${_pn532_txn}")
-    file(READ "${_pn532_txn}" _pn532_src)
-    if(NOT _pn532_src MATCHES "ACK mismatch: got")
-        string(REPLACE
-            "#include \"pn532_cxx/transport.hpp\""
-            "#include \"pn532_cxx/transport.hpp\"\n#include \"esp_log.h\""
-            _pn532_src "${_pn532_src}")
-        string(REPLACE
-            "    if (ack_buf[i] != EXPECTED_ACK[i]) {\n      _valid = false;"
-            "    if (ack_buf[i] != EXPECTED_ACK[i]) {\n      // Print what actually came back. The ACK is only ever six specific bytes, so a\n      // mismatch means either a floating bus (all 00 or all FF - nothing is driving\n      // MISO) or a real-but-wrong frame (the chip is talking, just not SPI). Those\n      // need opposite fixes and the error code alone cannot tell them apart.\n      ESP_LOGE(\"pn532\",\n               \"ACK mismatch: got %02X %02X %02X %02X %02X %02X, expected 00 00 FF 00 FF 00\",\n               ack_buf[0], ack_buf[1], ack_buf[2], ack_buf[3], ack_buf[4], ack_buf[5]);\n      _valid = false;"
-            _pn532_src "${_pn532_src}")
-        file(WRITE "${_pn532_txn}" "${_pn532_src}")
-        message(STATUS "pn532_cxx: applied the ACK diagnostic patch (submodule left at its pinned SHA)")
+foreach(_hk_submodule pn532_cxx pn532_hal)
+    set(_hk_patch "${CMAKE_CURRENT_LIST_DIR}/patches/${_hk_submodule}.patch")
+    set(_hk_subdir "${CMAKE_CURRENT_LIST_DIR}/components/${_hk_submodule}")
+    if(EXISTS "${_hk_patch}" AND IS_DIRECTORY "${_hk_subdir}")
+        execute_process(
+            COMMAND git apply --check "${_hk_patch}"
+            WORKING_DIRECTORY "${_hk_subdir}"
+            RESULT_VARIABLE _hk_check
+            OUTPUT_QUIET ERROR_QUIET)
+        if(_hk_check EQUAL 0)
+            execute_process(
+                COMMAND git apply "${_hk_patch}"
+                WORKING_DIRECTORY "${_hk_subdir}"
+                RESULT_VARIABLE _hk_applied
+                OUTPUT_QUIET ERROR_QUIET)
+            if(_hk_applied EQUAL 0)
+                message(STATUS "${_hk_submodule}: applied local patch (submodule left at its pinned SHA)")
+            else()
+                message(WARNING "${_hk_submodule}: failed to apply patches/${_hk_submodule}.patch")
+            endif()
+        endif()
     endif()
-endif()
+endforeach()
 
 idf_build_set_property(MINIMAL_BUILD ON)
 project(HomeKey-ESP32)

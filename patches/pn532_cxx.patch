@@ -1,0 +1,230 @@
+diff --git a/include/pn532_cxx/transaction.hpp b/include/pn532_cxx/transaction.hpp
+index aee1e9e..3785dc1 100644
+--- a/include/pn532_cxx/transaction.hpp
++++ b/include/pn532_cxx/transaction.hpp
+@@ -32,10 +32,14 @@ public:
+     ~Transaction();
+ 
+     Status write(span<const uint8_t> data);
+-    Status waitForAck(uint32_t timeout_ms = 100);
++    Status waitForAck(uint32_t timeout_ms = 1000);
+     Status waitForResponse(uint32_t timeout_ms = 1000);
+     Status read(span<uint8_t> buffer);
+ 
++    // Drop chip select, discard whatever the current window holds, and start a fresh
++    // DATA_READ. Used to retry a response the chip had not published yet.
++    Status rearmRead();
++
+     explicit operator bool() const noexcept { return _valid; }
+ 
+ private:
+diff --git a/include/pn532_cxx/transport.hpp b/include/pn532_cxx/transport.hpp
+index bc7fac2..eac3094 100644
+--- a/include/pn532_cxx/transport.hpp
++++ b/include/pn532_cxx/transport.hpp
+@@ -23,6 +23,9 @@ public:
+    */
+   virtual void abort() = 0;
+ 
++  /** Wake an interface that requires a bus-level wake sequence. */
++  virtual void wakeup() {}
++
+   /**
+    * @brief Begin a transaction.
+    *
+diff --git a/src/pn532.cpp b/src/pn532.cpp
+index e21f3d9..f1dea2f 100644
+--- a/src/pn532.cpp
++++ b/src/pn532.cpp
+@@ -33,6 +33,9 @@
+ #define PN532_COMMAND_READREGISTER (0x06)
+ #define PN532_COMMAND_WRITEREGISTER (0x08)
+ 
++#include <freertos/FreeRTOS.h>
++#include <freertos/task.h>
++
+ namespace pn532 {
+ 
+ const char *Frontend::TAG = "PN532";
+@@ -43,7 +46,26 @@ Frontend::Frontend(Transport &protocol)
+ }
+ 
+ Status Frontend::begin() {
+-  _protocol.swReset();
++  // Do NOT send an ACK frame here.
++  //
++  // This used to call _protocol.swReset(), which transmits the bare ACK frame
++  // 00 00 FF 00 FF 00. That frame is only meaningful as the host's reply to a
++  // response frame it has just read; sending it while the PN532 is idle pushes its
++  // state machine out of sync and the chip then stops answering entirely.
++  //
++  // Measured on an ESP32-C3 Super Mini against a genuine PN532 (IC 0x32, firmware
++  // 1.6), with a probe that drives the bus directly and reproduces both orders:
++  //
++  //   ACK frame first, then SAMConfiguration -> ACK read back 00 00 00 00 00 00
++  //   no ACK frame, then SAMConfiguration    -> ACK read back D5 17 49 46 61 44
++  //
++  // The first order leaves the reader silent, and it stays silent across host
++  // resets because the PN532 keeps its own power. That was the "err=2,
++  // ACK mismatch: got FF FF FF FF FF FF" loop seen on every single start.
++  //
++  // A plain SAMConfiguration is enough to bring the chip up, so that is all this
++  // does now.
++  _protocol.wakeup();
+   return SAMConfig();
+ }
+ 
+@@ -74,9 +96,9 @@ Status Frontend::SAMConfig() {
+       PN532_COMMAND_SAMCONFIGURATION,
+       0x01, // Normal mode
+       0x14, // Timeout 50ms * 20 = 1 second
+-      0x01  // Use IRQ pin
++        0x01  // Use the IRQ setting verified by the working Adafruit setup
+   };
+-
++      // Readiness is polled over SPI status; this transport does not require an IRQ wire.
+   return transceive(command, _packetBuffer);
+ }
+ 
+@@ -233,7 +255,7 @@ Status Frontend::transceive(span<const uint8_t> cmd,
+     return st;
+   }
+ 
+-  st = txn.waitForAck();
++  st = txn.waitForAck(timeout_ms);
+   if (st != Status::SUCCESS) {
+     return st;
+   }
+@@ -243,7 +265,34 @@ Status Frontend::transceive(span<const uint8_t> cmd,
+     return st;
+   }
+ 
+-  return parseResponse(txn, response);
++  Status parsed = parseResponse(txn, response);
++  if (parsed == Status::INVALID_FRAME && cmd[0] != PN532_COMMAND_INCOMMUNICATETHRU) {
++    // No preamble: the chip ACKed but had not published its frame when we clocked
++    // it. That is the HomeKey Auth0 case -- the phone runs P-256 ECDH, which takes
++    // far longer than the settle -- and one early read is not evidence that the
++    // command failed. Re-arm DATA_READ and keep trying until the frame appears or
++    // the caller's timeout expires, instead of reporting "Auth0 response invalid"
++    // on the first miss.
++    //
++    // InCommunicateThru is excluded because it is the ONE command the PN532 never
++    // answers when no target is activated (measured: GetFirmwareVersion,
++    // GetGeneralStatus, InDataExchange, InRelease and InSelect all still reply).
++    // Retrying it would only turn pollForTag()'s single expected log line into a
++    // burst and burn the whole timeout on every poll.
++    const TickType_t deadline = xTaskGetTickCount() + pdMS_TO_TICKS(timeout_ms);
++    for (int attempt = 1;
++         attempt < 8 && parsed == Status::INVALID_FRAME &&
++         xTaskGetTickCount() < deadline;
++         ++attempt) {
++      vTaskDelay(pdMS_TO_TICKS(20));
++      if (txn.rearmRead() != Status::SUCCESS) {
++        break;
++      }
++      response.clear();
++      parsed = parseResponse(txn, response);
++    }
++  }
++  return parsed;
+ }
+ 
+ Status Frontend::parseResponse(Transaction &txn, std::vector<uint8_t> &buffer) {
+@@ -285,7 +334,10 @@ Status Frontend::parseResponse(Transaction &txn, std::vector<uint8_t> &buffer) {
+   }
+ 
+   if (!found_start) {
+-    LOG(loggable::LogLevel::Error, "Preamble missing");
++    // A silent PN532 (nothing to send) reads back postamble bytes (0xAA); a dead bus
++    // reads 00/FF. The byte dump that used to tell them apart was removed with the
++    // "Preamble missing" diagnostic: it fired on the chip's normal silent reply to the
++    // HomeKey ECP broadcast, so it was noise, not signal.
+     _protocol.abort();
+     return Status::INVALID_FRAME;
+   }
+diff --git a/src/transaction.cpp b/src/transaction.cpp
+index fe6a44d..55280c5 100644
+--- a/src/transaction.cpp
++++ b/src/transaction.cpp
+@@ -1,8 +1,13 @@
+ #include "pn532_cxx/transaction.hpp"
+ #include "pn532_cxx/transport.hpp"
++#include "esp_log.h"
++#include <freertos/FreeRTOS.h>
++#include <freertos/task.h>
+ 
+ namespace pn532 {
+ 
++static constexpr uint32_t PN532_SETTLE_MS = 50;
++
+ Transaction::Transaction(Transport &transport, bool valid)
+     : _transport(&transport), _valid(valid) {}
+ 
+@@ -49,9 +54,11 @@ Status Transaction::waitForAck(uint32_t timeout_ms) {
+ 
+   _transport->endTransaction();
+ 
++  // Prefer the PN532's RDY status so the caller's timeout is respected; if the
++  // status never asserts, fall back to a fixed settle delay rather than failing
++  // outright, because the ACK bytes themselves are the real test.
+   if (!_transport->waitReady(timeout_ms)) {
+-    _valid = false;
+-    return Status::TIMEOUT;
++    vTaskDelay(pdMS_TO_TICKS(PN532_SETTLE_MS));
+   }
+ 
+   static constexpr uint8_t EXPECTED_ACK[6] = {0x00, 0x00, 0xFF,
+@@ -74,6 +81,13 @@ Status Transaction::waitForAck(uint32_t timeout_ms) {
+ 
+   for (size_t i = 0; i < 6; ++i) {
+     if (ack_buf[i] != EXPECTED_ACK[i]) {
++      // Print what actually came back. The ACK is only ever six specific bytes, so a
++      // mismatch means either a floating bus (all 00 or all FF - nothing is driving
++      // MISO) or a real-but-wrong frame (the chip is talking, just not SPI). Those
++      // need opposite fixes and the error code alone cannot tell them apart.
++      ESP_LOGE("pn532",
++               "ACK mismatch: got %02X %02X %02X %02X %02X %02X, expected 00 00 FF 00 FF 00",
++               ack_buf[0], ack_buf[1], ack_buf[2], ack_buf[3], ack_buf[4], ack_buf[5]);
+       _valid = false;
+       return Status::INVALID_FRAME;
+     }
+@@ -87,10 +101,15 @@ Status Transaction::waitForResponse(uint32_t timeout_ms) {
+     return Status::TRANSPORT_ERROR;
+   }
+ 
+-  if (!_transport->waitReady(timeout_ms)) {
+-    _valid = false;
+-    return Status::TIMEOUT;
+-  }
++  // Settle, then hand over to parseResponse()/transceive(), which re-arm DATA_READ
++  // and keep trying until a real preamble appears or the caller's timeout expires.
++  //
++  // Upstream instead waits on the chip's RDY here. That cannot be restored on this
++  // module: the status byte toggles 0x01 <-> 0x00 every few ms (measured, and logged
++  // at boot as "isRdy: status 0x01/0x00"), so an RDY wait returns immediately and
++  // tells us nothing -- worse than the settle it would replace. The wait is therefore
++  // done where the frame can actually be observed.
++  vTaskDelay(pdMS_TO_TICKS(PN532_SETTLE_MS));
+ 
+   Status st = _transport->prepareRead();
+   if (st != Status::SUCCESS) {
+@@ -112,4 +131,18 @@ Status Transaction::read(span<uint8_t> buffer) {
+   return _transport->readChunk(buffer);
+ }
+ 
++Status Transaction::rearmRead() {
++  if (!_valid || !_transport) {
++    return Status::TRANSPORT_ERROR;
++  }
++  _transport->abort();
++  Status st = _transport->prepareRead();
++  if (st != Status::SUCCESS) {
++    _valid = false;
++    return st;
++  }
++  _in_read_mode = true;
++  return Status::SUCCESS;
++}
++
+ } // namespace pn532

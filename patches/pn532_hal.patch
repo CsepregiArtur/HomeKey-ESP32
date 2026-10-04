@@ -1,0 +1,305 @@
+diff --git a/include/pn532_hal/spi.hpp b/include/pn532_hal/spi.hpp
+index 8f88b69..bf7fe56 100644
+--- a/include/pn532_hal/spi.hpp
++++ b/include/pn532_hal/spi.hpp
+@@ -23,6 +23,7 @@ public:
+ 
+   void swReset() override;
+   void abort() override;
++  void wakeup() override;
+   Transaction begin() override;
+ 
+ protected:
+diff --git a/src/spi.cpp b/src/spi.cpp
+index 63c2b26..e760d1b 100644
+--- a/src/spi.cpp
++++ b/src/spi.cpp
+@@ -18,7 +18,7 @@
+ 
+ static const char *TAG = "PN532::SPI";
+ 
+-#define PN532_SPI_CLOCK_SPEED_HZ (1000 * 1000)
++#define PN532_SPI_CLOCK_SPEED_HZ (100 * 1000)
+ #define PN532_CMD_DATA_WRITE 0x01
+ #define PN532_CMD_STATUS_READ 0x02
+ #define PN532_CMD_DATA_READ 0x03
+@@ -54,7 +54,7 @@ SpiTransport::SpiTransport(gpio_num_t irq, gpio_num_t miso, gpio_num_t mosi,
+   buscfg.quadhd_io_num = -1;
+   buscfg.max_transfer_sz = SPI_MAX_DMA_LEN;
+ 
+-  ret = spi_bus_initialize(SPI2_HOST, &buscfg, SPI_DMA_CH_AUTO);
++  ret = spi_bus_initialize(SPI2_HOST, &buscfg, SPI_DMA_DISABLED);
+   if (ret == ESP_ERR_INVALID_STATE) {
+     ESP_LOGW(TAG, "SPI bus already initialized, reusing");
+   } else if (ret != ESP_OK) {
+@@ -100,6 +100,7 @@ SpiTransport::SpiTransport(gpio_num_t irq, gpio_num_t miso, gpio_num_t mosi,
+   if (!_dma_buffer) {
+     ESP_LOGE(TAG, "Failed to allocate DMA buffer");
+   }
++
+ }
+ 
+ SpiTransport::~SpiTransport() {
+@@ -122,28 +123,28 @@ void IRAM_ATTR SpiTransport::irq_isr_handler(void *arg) {
+ 
+ void SpiTransport::swReset() { abort(); }
+ 
+-void SpiTransport::abort() {
++void SpiTransport::wakeup() {
+   gpio_set_level(_ss, 0);
+-  vTaskDelay(2 / portTICK_PERIOD_MS);
+-  static const uint8_t ABORT[7] = {0x01, 0, 0, 0xFF, 0, 0xFF, 0};
+-  spi_transaction_t t_data = {};
+-  t_data.length = sizeof(ABORT) * 8;
+-  t_data.tx_buffer = ABORT;
+-
+-  esp_err_t ret = spi_device_acquire_bus(_spi, portMAX_DELAY);
+-
+-  if(ret != ESP_OK){
+-    ESP_LOGE(TAG, "abort: Failed to acquire SPI Bus: %d", ret);
+-    return;
+-  }
++  ets_delay_us(2000);
++}
+ 
+-  ret = spi_device_transmit(_spi, &t_data);
+-  if(ret != ESP_OK){
+-    ESP_LOGE(TAG, "abort: Failed to transmit data");
+-    return;
+-  }
++void SpiTransport::abort() {
++  // Recover to a clean transport state WITHOUT putting anything on the bus.
++  //
++  // Older versions of this function transmitted the bare ACK frame 00 00 FF 00 FF 00
++  // (and before that, a DATA_WRITE-prefixed variant of it). Both are wrong: the ACK
++  // frame is only meaningful as the host's reply to a response frame it has just
++  // read, and sending one at any other time leaves the PN532's state machine waiting
++  // for the rest of a frame that never arrives. The chip then stops answering every
++  // later command. Measured on a genuine PN532 (IC 0x32, firmware 1.6) on an
++  // ESP32-C3 Super Mini: sending the bare ACK frame while the chip was idle took a
++  // working reader and made it return 00 00 00 00 00 00 to every subsequent read.
++  //
++  // There is nothing useful the host can write to recover a PN532 that is wedged; a
++  // real recovery needs a power cycle of the module, which software cannot perform.
++  // So the correct behaviour on abort is to deselect the chip, drop the transaction
++  // state, and let the caller retry from a clean start.
+   gpio_set_level(_ss, 1);
+-  spi_device_release_bus(_spi);
+   _pending.store(false, std::memory_order_release);
+   _ready.store(false, std::memory_order_release);
+ }
+@@ -183,24 +184,59 @@ Status SpiTransport::writeChunk(span<const uint8_t> data) {
+     return Status::TRANSPORT_ERROR;
+   }
+ 
+-  std::copy(data.begin(), data.end(), _dma_buffer);
+-
+-  spi_transaction_t t_data = {};
+-  t_data.length = data.size() * 8;
+-  t_data.tx_buffer = _dma_buffer;
++  // Write in transactions that FIT THE BUS, not in one transaction per frame.
++  //
++  // This used to clock the whole span in a single spi_device_transmit(). The bus is
++  // initialised with SPI_DMA_DISABLED, and in that case the GPSPI driver IGNORES
++  // buscfg.max_transfer_sz (here SPI_MAX_DMA_LEN) and forces
++  // max_transfer_sz = SOC_SPI_MAXIMUM_BUFFER_SIZE, which is 64 bytes on the
++  // ESP32-C3 (esp_driver_spi/src/gpspi/spi_common.c). check_trans_valid() then
++  // rejects anything longer with:
++  //   E (54109) spi_master: check_trans_valid(1123): txdata transfer > host maximum
++  // and spi_device_transmit() returns ESP_ERR_INVALID_ARG with nothing on the wire.
++  //
++  // That capped the transport at 64 bytes per frame while DMA_BUFFER_SIZE allows
++  // 265, so every small command worked (GetFirmwareVersion, passive poll) and every
++  // large one failed. A HomeKey Auth0 APDU is ~100 bytes -- the reader's P-256
++  // public key alone is 65 -- so HomeKey could never authenticate: the write failed
++  // mid-frame and left the PN532 waiting for the rest of it, after which every read
++  // returned 00/FF ("Preamble missing", "ACK mismatch", "Passive poll failed").
++  //
++  // SS stays asserted across the whole frame (spics_io_num = -1, the GPIO is driven
++  // manually in begin()/endTransaction()), so splitting the frame into several
++  // transactions is invisible to the chip -- it is also what the PN532 datasheet's
++  // own SPI examples do, one byte per transfer.
++  constexpr size_t kMaxTxBytes = SOC_SPI_MAXIMUM_BUFFER_SIZE;
+ 
+   esp_err_t ret = spi_device_acquire_bus(_spi, portMAX_DELAY);
+   if(ret != ESP_OK){
+     ESP_LOGE(TAG, "writeChunk: Failed to acquire SPI Bus: %d", ret);
+     return Status::TRANSPORT_ERROR;
+   }
+-  ret = spi_device_transmit(_spi, &t_data);
+-  spi_device_release_bus(_spi);
+-  if (ret != ESP_OK) {
+-    ESP_LOGE(TAG, "SPI writeChunk failed");
+-    return Status::TRANSPORT_ERROR;
++
++  const uint8_t *src = data.data();
++  size_t remaining = data.size();
++  while (remaining > 0) {
++    const size_t n = std::min(remaining, kMaxTxBytes);
++    std::copy(src, src + n, _dma_buffer);
++
++    spi_transaction_t t_data = {};
++    t_data.length = n * 8;
++    t_data.tx_buffer = _dma_buffer;
++
++    ret = spi_device_transmit(_spi, &t_data);
++    if (ret != ESP_OK) {
++      ESP_LOGE(TAG, "SPI writeChunk failed at byte %u/%u (err=%d)",
++               (unsigned)(data.size() - remaining), (unsigned)data.size(), ret);
++      spi_device_release_bus(_spi);
++      return Status::TRANSPORT_ERROR;
++    }
++    src += n;
++    remaining -= n;
+   }
+ 
++  spi_device_release_bus(_spi);
++
+   ESP_LOGV(TAG, "writeChunk: len=%d, data=%s", data.size(), fmt::format("{:02X}", fmt::join(data, "")).c_str());
+   return Status::SUCCESS;
+ }
+@@ -212,11 +248,19 @@ bool SpiTransport::waitReady(uint32_t timeout_ms) {
+   uint32_t start = xTaskGetTickCount();
+   while (!isRdy()) {
+     if ((xTaskGetTickCount() - start) > pdMS_TO_TICKS(timeout_ms)) {
++      // Do NOT call abort() here.
++      //
++      // abort() transmits the bare ACK frame 00 00 FF 00 FF 00. That frame is only
++      // valid as the host's reply to a response frame it has just read, so sending
++      // it because we gave up polling tells an idle PN532 something it never asked
++      // for: the chip goes out of sync and stops driving MISO altogether. Every
++      // later transfer then reads FF FF FF FF FF FF (nothing on the bus), which
++      // looks like a wiring fault but is self-inflicted. The caller recovers by
++      // reading the ACK anyway; if that fails it can retry from a clean state.
+       ESP_LOGV(TAG, "Timeout waiting for RDY");
+-      abort();
+       return false;
+     }
+-    vTaskDelay(pdMS_TO_TICKS(1));
++    vTaskDelay(pdMS_TO_TICKS(10));
+   }
+   return true;
+ }
+@@ -247,30 +291,52 @@ Status SpiTransport::prepareRead() {
+ }
+ 
+ Status SpiTransport::readChunk(span<uint8_t> buffer) {
+-  if (!_dma_buffer || buffer.size() > DMA_BUFFER_SIZE) {
+-    ESP_LOGE(TAG, "readChunk: DMA buffer unavailable or request too large");
+-    return Status::TRANSPORT_ERROR;
++  if (buffer.empty()) {
++    return Status::SUCCESS;
+   }
+ 
+-  spi_transaction_t t_data = {};
+-  t_data.length = buffer.size() * 8;
+-  t_data.rxlength = buffer.size() * 8;
+-  t_data.rx_buffer = _dma_buffer;
++  // Read ONE BYTE PER TRANSACTION, not as a single multi-byte burst.
++  //
++  // This used to clock the whole requested length in one DMA transaction routed
++  // through _dma_buffer. Against a genuine PN532 (IC 0x32, firmware 1.6) on an
++  // ESP32-C3 Super Mini that read returned 00 00 00 00 00 00 -- nothing -- even
++  // though the same pins and the same command/ACK framing worked perfectly when a
++  // probe clocked the identical bytes through one-byte transactions. The multi-byte
++  // read is the only part of the exchange the probe never had to exercise, which is
++  // what pointed at it.
++  //
++  // The PN532's SPI interface is known to be relaxed about how a host clocks data
++  // out of it, and its own datasheet examples read the status byte and the frame in
++  // single-byte steps. Doing the same here costs a few microseconds per byte, on a
++  // bus that carries at most a couple of dozen bytes per command, and removes the
++  // entire DMA-length/alignment question from the path.
++  uint8_t tx_dummy = 0x00;
+ 
+   esp_err_t ret = spi_device_acquire_bus(_spi, portMAX_DELAY);
+-  if(ret != ESP_OK){
+-    ESP_LOGE(TAG, "readChunk: Failed to acquire SPI Bus: %d", ret);
+-    return Status::TRANSPORT_ERROR;
+-  }
+-  ret = spi_device_transmit(_spi, &t_data);
+-  spi_device_release_bus(_spi);
+   if (ret != ESP_OK) {
+-    ESP_LOGE(TAG, "SPI readChunk failed");
++    ESP_LOGE(TAG, "readChunk: Failed to acquire SPI Bus: %d", ret);
+     return Status::TRANSPORT_ERROR;
+   }
+ 
+-  std::copy_n(_dma_buffer, buffer.size(), buffer.data());
++  for (size_t i = 0; i < buffer.size(); ++i) {
++    uint8_t byte = 0x00;
++    spi_transaction_t t_byte = {};
++    t_byte.length = 8;
++    t_byte.rxlength = 8;
++    t_byte.tx_buffer = &tx_dummy;
++    t_byte.rx_buffer = &byte;
++
++    ret = spi_device_transmit(_spi, &t_byte);
++    if (ret != ESP_OK) {
++      ESP_LOGE(TAG, "readChunk: SPI transmit failed at byte %u: %d",
++               (unsigned)i, ret);
++      spi_device_release_bus(_spi);
++      return Status::TRANSPORT_ERROR;
++    }
++    buffer[i] = byte;
++  }
+ 
++  spi_device_release_bus(_spi);
+   ESP_LOGV(TAG, "readChunk: len=%d, data=%s", buffer.size(), fmt::format("{:02X}", fmt::join(buffer, "")).c_str());
+   return Status::SUCCESS;
+ }
+@@ -299,18 +365,46 @@ bool SpiTransport::isRdy() {
+   t.tx_data[0] = PN532_CMD_STATUS_READ;
+   spi_device_transmit(_spi, &t);
+ 
+-  uint8_t status_byte = 0;
+-  memset(&t, 0, sizeof(t));
+-  t.flags = SPI_TRANS_USE_RXDATA;
+-  t.length = 8;
+-  t.rxlength = 8;
+-
+-  spi_device_transmit(_spi, &t);
+-  status_byte = t.rx_data[0];
++  // Read the status byte through rx_buffer, NOT through SPI_TRANS_USE_RXDATA.
++  //
++  // rx_data is declared as uint8_t[4], but the driver casts it to a uint32_t and
++  // hands that to the peripheral as the receive word:
++  //
++  //     uint32_t* rcv_ptr = (trans_desc->flags & SPI_TRANS_USE_RXDATA)
++  //                             ? (uint32_t *)trans_desc->rx_data
++  //                             : (uint32_t *)trans_desc->rx_buffer;
++  //
++  // For an 8-bit receive the peripheral returns the byte left-aligned, so the real
++  // status byte lands in the most significant byte of that word. Reading rx_data[0]
++  // (the least significant byte on this little-endian chip) therefore always returns
++  // 0x00, bit 0 is never set, and isRdy() reports "not ready" forever -- waitReady()
++  // then times out on every command even though the bus is perfectly healthy.
++  //
++  // Measured on an ESP32-C3 Super Mini against a genuine PN532 (IC 0x32, firmware
++  // 1.6), same pins, same transaction framing, only the read mechanism differing:
++  //
++  //     rx_buffer          -> status byte 0x08, RDY readable
++  //     SPI_TRANS_USE_RXDATA -> status byte 0x00, RDY never readable
++  uint8_t tx_dummy = 0x00;
++  uint8_t status_byte = 0x00;
++  spi_transaction_t t_read = {};
++  t_read.length = 8;
++  t_read.rxlength = 8;
++  t_read.tx_buffer = &tx_dummy;
++  t_read.rx_buffer = &status_byte;
++
++  spi_device_transmit(_spi, &t_read);
+ 
+   gpio_set_level(_ss, 1);
+   spi_device_release_bus(_spi);
+ 
++  // The RDY diagnostic that used to live here has been removed. It measured the
++  // status byte to decide whether the RDY bit could gate the response wait, and it
++  // answered that question: RDY reads high ~95% of the time (0x01 held ~217 ms,
++  // 0x08 only ~12 ms per ~229 ms poll cycle), so an RDY wait returns immediately and
++  // tells us nothing. It also flooded the log at WARN on every status-byte toggle
++  // (~9 lines/s). The response wait is gated on the frame itself (transaction.cpp),
++  // not on RDY.
+   return status_byte & 0x01;
+ }
+ 
